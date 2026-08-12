@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">循环清单</string>
+    <string name="channel_reminder_name">任务提醒</string>
+    <string name="channel_reminder_desc">清单任务到期前的提醒通知</string>
+</resources>

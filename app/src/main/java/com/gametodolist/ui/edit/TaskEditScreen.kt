@@ -33,6 +33,8 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -72,7 +74,16 @@ fun TaskEditScreen(
 
     LaunchedEffect(state.saved) { if (state.saved) onBack() }
 
+    val snackbarHostState = remember { SnackbarHostState() }
+    LaunchedEffect(state.errorMessage) {
+        state.errorMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.consumeError()
+        }
+    }
+
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text(if (state.id == 0L) "新增清单" else "编辑清单") },
@@ -171,23 +182,29 @@ fun TaskEditScreen(
                         onPicked = { d -> viewModel.update { it.copy(anchorDate = d) } }
                     )
                 }
-                RecurrenceType.WEEKLY -> FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    WEEKDAY_LABELS.forEachIndexed { index, label ->
-                        val bit = 1 shl index
-                        FilterChip(
-                            selected = state.weekdaysMask and bit != 0,
-                            onClick = {
-                                viewModel.update { it.copy(weekdaysMask = it.weekdaysMask xor bit) }
-                            },
-                            label = { Text("周$label") }
-                        )
+                RecurrenceType.WEEKLY -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        WEEKDAY_LABELS.forEachIndexed { index, label ->
+                            val bit = 1 shl index
+                            FilterChip(
+                                selected = state.weekdaysMask and bit != 0,
+                                onClick = {
+                                    viewModel.update { it.copy(weekdaysMask = it.weekdaysMask xor bit) }
+                                },
+                                label = { Text("周$label") }
+                            )
+                        }
                     }
+                    AnchorDateSection(state, viewModel)
                 }
-                RecurrenceType.MONTHLY -> NumberField(
-                    label = "每月第几日（短月自动取月末）",
-                    value = state.monthDay,
-                    onValueChange = { v -> viewModel.update { it.copy(monthDay = v) } }
-                )
+                RecurrenceType.MONTHLY -> Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
+                    NumberField(
+                        label = "每月第几日（短月自动取月末）",
+                        value = state.monthDay,
+                        onValueChange = { v -> viewModel.update { it.copy(monthDay = v) } }
+                    )
+                    AnchorDateSection(state, viewModel)
+                }
             }
 
             // ---- 显示时段 ----
@@ -255,9 +272,9 @@ fun TaskEditScreen(
                 (state.recurrenceType != RecurrenceType.WEEKLY || state.weekdaysMask != 0)
             Button(
                 onClick = viewModel::save,
-                enabled = canSave,
+                enabled = canSave && !state.saving,
                 modifier = Modifier.fillMaxWidth()
-            ) { Text("保存") }
+            ) { Text(if (state.saving) "保存中…" else "保存") }
 
             Spacer(Modifier.height(24.dp))
         }
@@ -273,7 +290,9 @@ private fun SectionTitle(text: String) {
 private fun NumberField(label: String, value: Int, onValueChange: (Int) -> Unit) {
     OutlinedTextField(
         value = value.toString(),
-        onValueChange = { s -> s.toIntOrNull()?.let(onValueChange) },
+        onValueChange = { s ->
+            s.filter { it.isDigit() }.toIntOrNull()?.let { onValueChange(it.coerceAtLeast(1)) }
+        },
         label = { Text(label) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
@@ -336,6 +355,37 @@ private fun DateField(
             }
         ) {
             DatePicker(state = pickerState)
+        }
+    }
+}
+
+/** WEEKLY/MONTHLY 的开始日期开关：未指定 = 立即开始（anchorDate 存 0，保持旧行为） */
+@Composable
+private fun AnchorDateSection(state: TaskEditUiState, viewModel: TaskEditViewModel) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("指定开始日期", style = MaterialTheme.typography.titleSmall)
+                Text(
+                    "首个循环不早于该日期；不指定则立即开始",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+            Switch(
+                checked = state.anchorEnabled,
+                onCheckedChange = { v -> viewModel.update { it.copy(anchorEnabled = v) } }
+            )
+        }
+        if (state.anchorEnabled) {
+            DateField(
+                label = "开始日期",
+                dateMillis = state.anchorDate,
+                onPicked = { d -> viewModel.update { it.copy(anchorDate = d) } }
+            )
         }
     }
 }

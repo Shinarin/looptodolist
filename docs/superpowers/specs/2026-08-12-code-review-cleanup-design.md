@@ -99,7 +99,7 @@ suspend fun settleAndRefresh() {
 - 魔数颜色 `0xFF7FB69E`/`0xFFB45A5A` 收敛到 `theme/Color.kt`（启用已定义的 `ExpiredRed`）；`DarkColors` 维持现状（明确不做深色重做）。
 - 魔法数字 guard（500/400）提为命名常量。
 - `sortOrder` 字段保留 + 注释"预留未启用"（删列需重建表，成本不值）。
-- 组件边角：`TodoWidgetReceiver.onDeleted` 清理 `crop_rect_<id>_*` 残留键；API 26-30 或无壁纸时 `WidgetCropActivity.onCreate` 直接 `setResult(CANCELED); finish()`；configure 保存回传 `EXTRA_APPWIDGET_ID`；裸 `CoroutineScope` 改 `lifecycleScope`；组件尺寸选取优先 `OPTION_APPWIDGET_WIDTH/HEIGHT`；`todo_widget_info.xml` 加 `widget_description`；`initialized` Float 标志改 Boolean。
+- 组件边角：`TodoWidgetReceiver.onDeleted` 清理 `crop_rect_<id>_*` 残留键；API 26-30 或无壁纸时 `WidgetCropActivity` 所有退出路径（含取消/返回）均 RESULT_OK 携带组件 id 放行添加（CANCELED 会导致组件加不上）；configure 保存回传 `EXTRA_APPWIDGET_ID`；裸 `CoroutineScope` 改 `lifecycleScope`；组件尺寸选取优先 `OPTION_APPWIDGET_WIDTH/HEIGHT`；`todo_widget_info.xml` 加 `widget_description`；`initialized` Float 标志改 Boolean。
 - `windowStart` 字段保留 + 注释用途（存储冗余但迁移成本高）。
 
 ## 7. 测试计划

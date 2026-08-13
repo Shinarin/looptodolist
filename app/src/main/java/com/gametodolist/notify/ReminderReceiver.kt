@@ -37,6 +37,8 @@ class ReminderReceiver : BroadcastReceiver() {
                     return@launch
                 }
                 showNotification(context, instanceId, title)
+            } catch (e: Exception) {
+                android.util.Log.w("ReminderReceiver", "check instance failed", e)
             } finally {
                 pendingResult.finish()
             }

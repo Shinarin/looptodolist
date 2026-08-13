@@ -91,8 +91,8 @@ class TodoRepository @Inject constructor(
     /** 每个模板的最新实例 */
     fun observeLatestInstances(): Flow<List<TaskInstanceEntity>> = instanceDao.observeLatestPerTemplate()
 
-    /** 主页数据：按每个模板的最新实例分为「未完成」与「已完成」两区，
-     * 各区内再按分类分组；最新实例已作废（EXPIRED）的不显示。
+    /** 主页数据：按每个模板的最新实例分为「未完成」「已完成」「已作废」三区，
+     * 各区内再按分类分组；已作废区基本只有一次性+自定义天数任务（可重新开启）。
      */
     fun observeHomeData(): Flow<HomeData> =
         combine(

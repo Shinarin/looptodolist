@@ -19,7 +19,7 @@ import javax.inject.Singleton
  * - [rolloverAll]：App 启动、回前台、WorkManager 周期任务、数据变更管线调用。
  * - [regenerateActiveInstance]：模板规则变更（编辑保存）后调用——先就地修正当前实例
  *   （循环起点失效则作废弃置，否则重算窗口），再跑一遍结算补齐。
- * - 四个 public 入口共用一把互斥锁，配合实例表 (templateId, cycleStart) 唯一索引，
+ * - 三个 public 入口共用一把互斥锁，配合实例表 (templateId, cycleStart) 唯一索引，
  *   防止并发结算重复插入。注意 Mutex 不可重入：锁只在 public 入口，私有 *Locked 方法不带锁。
  */
 @Singleton
@@ -35,12 +35,6 @@ class RolloverManager @Inject constructor(
     ) = mutex.withLock {
         templateDao.getActive().forEach { rolloverTemplateLocked(it, nowMillis, zone) }
     }
-
-    suspend fun rolloverTemplate(
-        template: TaskTemplateEntity,
-        nowMillis: Long = System.currentTimeMillis(),
-        zone: ZoneId = ZoneId.systemDefault()
-    ) = mutex.withLock { rolloverTemplateLocked(template, nowMillis, zone) }
 
     /** 模板规则变更后修正当前实例并结算 */
     suspend fun regenerateActiveInstance(

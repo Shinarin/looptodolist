@@ -48,4 +48,28 @@ class WallpaperCropTest {
             assertTrue(r[1] + r[3] <= 1920)
         }
     }
+
+    @Test
+    fun `源图与目标同比例 整图返回`() {
+        assertArrayEquals(
+            intArrayOf(0, 0, 1000, 500),
+            WallpaperCrop.cropRect(1000, 500, 2.0f, 0.5f, 0.5f)
+        )
+    }
+
+    @Test
+    fun `1x1 极值源图不崩溃`() {
+        val r = WallpaperCrop.cropRect(1, 1, 2.4f, 0.5f, 0.5f)
+        assertTrue(r[2] >= 1 || r[3] >= 1)
+        assertTrue(r[0] + r[2] <= 1 && r[1] + r[3] <= 1)
+    }
+
+    @Test
+    fun `返回窗口比例约等于目标比例`() {
+        listOf(0.5f, 1.0f, 1.7f, 2.4f).forEach { aspect ->
+            val r = WallpaperCrop.cropRect(1080, 1920, aspect, 0.3f, 0.7f)
+            val actual = r[2].toFloat() / r[3]
+            assertTrue(kotlin.math.abs(actual - aspect) < 0.01f)
+        }
+    }
 }

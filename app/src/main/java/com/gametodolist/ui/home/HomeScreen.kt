@@ -350,7 +350,6 @@ private fun SwipeableTaskCard(
     }
 }
 
-
 @Composable
 private fun ExpiredTaskCard(
     item: TemplateWithInstance,

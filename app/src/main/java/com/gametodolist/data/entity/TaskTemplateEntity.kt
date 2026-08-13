@@ -15,6 +15,7 @@ data class TaskTemplateEntity(
     val categoryId: Long?,
     val title: String,
     val note: String = "",
+    // 预留：任务排序未启用（恒为 0，按 id 排序）
     val sortOrder: Int = 0,
 
     val recurrenceType: String = "NONE",

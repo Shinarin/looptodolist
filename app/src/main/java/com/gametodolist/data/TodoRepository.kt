@@ -85,8 +85,6 @@ class TodoRepository @Inject constructor(
 
     suspend fun uncompleteInstance(instanceId: Long) = instanceDao.markActive(instanceId)
 
-    suspend fun getActiveInstances(): List<TaskInstanceEntity> = instanceDao.getActive()
-
     /** 所有未归档模板 */
     fun observeTemplates(): Flow<List<TaskTemplateEntity>> = templateDao.observeActive()
 

@@ -11,9 +11,6 @@ import kotlinx.coroutines.flow.Flow
 @Dao
 interface TaskInstanceDao {
     @Query("SELECT * FROM task_instances WHERE status = 'ACTIVE'")
-    fun observeActive(): Flow<List<TaskInstanceEntity>>
-
-    @Query("SELECT * FROM task_instances WHERE status = 'ACTIVE'")
     suspend fun getActive(): List<TaskInstanceEntity>
 
     @Query("SELECT * FROM task_instances WHERE templateId = :templateId ORDER BY cycleStart DESC LIMIT 1")
@@ -29,14 +26,6 @@ interface TaskInstanceDao {
 
     @Query("UPDATE task_instances SET status = 'ACTIVE', completedAt = NULL WHERE id = :id")
     suspend fun markActive(id: Long)
-
-    // 窗口与本范围重叠，或循环起点落在本范围内；无截止的一次性任务不参与窗口匹配
-    @Query(
-        "SELECT * FROM task_instances WHERE " +
-            "(windowEnd != 9223372036854775807 AND windowStart < :rangeEnd AND windowEnd > :rangeStart) " +
-            "OR (cycleStart >= :rangeStart AND cycleStart < :rangeEnd)"
-    )
-    fun observeInRange(rangeStart: Long, rangeEnd: Long): Flow<List<TaskInstanceEntity>>
 
     @Query("SELECT * FROM task_instances WHERE id = :id")
     suspend fun getById(id: Long): TaskInstanceEntity?

@@ -142,7 +142,7 @@ class TaskEditViewModel @Inject constructor(
                     reminderEnabled = s.reminderEnabled,
                     reminderMinutesBefore = s.reminderMinutesBefore
                 )
-                val newId = repository.saveTemplate(entity)
+                repository.saveTemplate(entity)
                 if (s.id != 0L) {
                     rolloverManager.regenerateActiveInstance(entity.copy(id = s.id))
                 }

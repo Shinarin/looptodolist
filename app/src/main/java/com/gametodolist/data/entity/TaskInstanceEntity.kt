@@ -28,7 +28,7 @@ data class TaskInstanceEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,
     val templateId: Long,
     val cycleStart: Long,   // 本次循环起点 epoch millis
-    val windowStart: Long,  // 显示窗口起点
+    val windowStart: Long,  // 显示窗口起点（保留字段：窗口本可由引擎重算，此列为历史存储）
     val windowEnd: Long,    // 显示窗口终点 = 截止时间
     val status: String = "ACTIVE",
     val completedAt: Long? = null

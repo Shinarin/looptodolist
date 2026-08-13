@@ -42,11 +42,9 @@ private class FakeTemplateDao(private val templates: MutableList<TaskTemplateEnt
 }
 
 private class FakeInstanceDao(val instances: MutableList<TaskInstanceEntity> = mutableListOf()) : TaskInstanceDao {
-    override fun observeActive(): Flow<List<TaskInstanceEntity>> = flowOf(instances.filter { it.status == "ACTIVE" })
     override suspend fun getActive(): List<TaskInstanceEntity> = instances.filter { it.status == "ACTIVE" }
     override suspend fun getLatestForTemplate(templateId: Long): TaskInstanceEntity? =
         instances.filter { it.templateId == templateId }.maxByOrNull { it.cycleStart }
-    override fun observeInRange(rangeStart: Long, rangeEnd: Long): Flow<List<TaskInstanceEntity>> = flowOf(instances)
     override fun observeLatestPerTemplate(): Flow<List<TaskInstanceEntity>> =
         flowOf(instances.groupBy { it.templateId }.mapNotNull { (_, list) -> list.maxByOrNull { it.cycleStart } })
     override suspend fun markActive(id: Long) {

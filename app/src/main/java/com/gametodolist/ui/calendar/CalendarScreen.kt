@@ -29,6 +29,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -44,10 +45,12 @@ import com.gametodolist.domain.InstanceStatus
 import com.gametodolist.ui.WEEKDAY_LABELS
 import com.gametodolist.ui.components.EmptyState
 import com.gametodolist.ui.components.LabelChip
+import com.gametodolist.ui.remainingLabel
+import com.gametodolist.ui.theme.CompletedGreen
+import com.gametodolist.ui.theme.ExpiredRed
+import com.gametodolist.ui.theme.UncategorizedGray
 import com.gametodolist.ui.toEpochMillis
-import com.gametodolist.ui.toLocalDate
 import java.time.LocalDate
-import java.time.temporal.ChronoUnit
 
 @Composable
 fun CalendarScreen(
@@ -59,10 +62,13 @@ fun CalendarScreen(
     val selectedDate by viewModel.selectedDate.collectAsStateWithLifecycle()
     val monthRenewals by viewModel.monthRenewals.collectAsStateWithLifecycle()
     val dayItems by viewModel.dayItems.collectAsStateWithLifecycle()
+    val categories by viewModel.categories.collectAsStateWithLifecycle()
+    fun colorOf(categoryId: Long?): Color =
+        categories.firstOrNull { it.id == categoryId }?.color?.let(::Color) ?: UncategorizedGray
 
     // 更新日打点：日期 → 当天更新清单的分类色
     val dotsByDate: Map<LocalDate, List<Color>> = monthRenewals.mapValues { (_, categoryIds) ->
-        categoryIds.map { viewModel.categoryColor(it)?.let(::Color) ?: Color(0xFF9E9E9E) }
+        categoryIds.map { colorOf(it) }
     }
 
     Scaffold(
@@ -112,6 +118,7 @@ fun CalendarScreen(
                 IconButton(onClick = viewModel::nextMonth, modifier = Modifier.size(40.dp)) {
                     Icon(Icons.AutoMirrored.Filled.KeyboardArrowRight, contentDescription = "下月")
                 }
+                TextButton(onClick = viewModel::goToToday) { Text("今天") }
             }
 
             // 星期表头
@@ -162,25 +169,13 @@ fun CalendarScreen(
                         DayItemCard(
                             dayItem = dayItem,
                             selectedDate = selectedDate,
-                            color = viewModel.categoryColor(dayItem.item.template.categoryId)
-                                ?.let(::Color) ?: Color(0xFF9E9E9E),
+                            color = colorOf(dayItem.item.template.categoryId),
                             onClick = { onEditTask(dayItem.item.template.id) }
                         )
                     }
                 }
             }
         }
-    }
-}
-
-/** 相对所选日期的剩余天数文案 */
-private fun remainingText(selectedDate: LocalDate, windowEnd: Long): String {
-    if (windowEnd == Long.MAX_VALUE) return "长期有效"
-    val days = ChronoUnit.DAYS.between(selectedDate, windowEnd.toLocalDate())
-    return when {
-        days <= 0L -> "今日截止"
-        days == 1L -> "明日截止"
-        else -> "剩 $days 天"
     }
 }
 
@@ -303,12 +298,16 @@ private fun DayItemCard(
             // 右侧：剩余天数；已完成/已作废显示状态
             when (dayItem.status) {
                 InstanceStatus.COMPLETED.name ->
-                    LabelChip("已完成", Color(0xFF7FB69E))
+                    LabelChip("已完成", CompletedGreen)
                 InstanceStatus.EXPIRED.name ->
-                    LabelChip("已作废", Color(0xFFB45A5A))
+                    LabelChip("已作废", ExpiredRed)
                 else ->
                     Text(
-                        remainingText(selectedDate, dayItem.windowEnd),
+                        remainingLabel(
+                            dayItem.windowStart,
+                            dayItem.windowEnd,
+                            selectedDate.toEpochMillis()
+                        ),
                         style = MaterialTheme.typography.labelMedium,
                         color = color
                     )

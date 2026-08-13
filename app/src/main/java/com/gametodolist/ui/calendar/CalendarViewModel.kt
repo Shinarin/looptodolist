@@ -1,5 +1,6 @@
 package com.gametodolist.ui.calendar
 
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.gametodolist.data.TemplateWithInstance
@@ -91,7 +92,7 @@ class CalendarViewModel @Inject constructor(
                         status = real?.status ?: InstanceStatus.ACTIVE.name,
                         isRenewal = cycle == date
                     )
-                }.getOrNull()
+                }.onFailure { Log.w("CalendarViewModel", "模板 ${t.id} 规则计算失败", it) }.getOrNull()
             }.sortedBy { it.windowEnd }
         }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -110,7 +111,7 @@ class CalendarViewModel @Inject constructor(
             val result = mutableListOf<LocalDate>()
             var cycle = RecurrenceEngine.currentCycleStartDate(monthStart, t, zone)
             var guard = 0
-            while (cycle <= monthEnd && guard++ < 400) {
+            while (cycle <= monthEnd && guard++ < MAX_RENEWAL_CYCLES) {
                 if (cycle >= monthStart) result.add(cycle)
                 val next = RecurrenceEngine.nextCycleStartDate(cycle, t)
                 if (next == cycle) break // NONE：起点即唯一起点
@@ -131,6 +132,14 @@ class CalendarViewModel @Inject constructor(
         _month.value = _month.value.plusMonths(1)
     }
 
-    fun categoryColor(categoryId: Long?): Long? =
-        categories.value.firstOrNull { it.id == categoryId }?.color
+    /** 回到本月并选中今天 */
+    fun goToToday() {
+        _month.value = YearMonth.now()
+        _selectedDate.value = LocalDate.now()
+    }
+
+    private companion object {
+        /** 单月打点最多推进的循环数（防极端规则下长时间计算） */
+        const val MAX_RENEWAL_CYCLES = 400
+    }
 }

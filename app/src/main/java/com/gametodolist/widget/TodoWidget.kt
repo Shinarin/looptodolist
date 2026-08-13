@@ -51,7 +51,9 @@ import com.gametodolist.data.TemplateWithInstance
 import com.gametodolist.domain.WallpaperCrop
 import com.gametodolist.ui.MainActivity
 import com.gametodolist.ui.remainingLabel
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 
 /** 「已完成」区展开状态在 Glance Preferences 里的键（TodoWidget 与 ToggleShowCompletedAction 共用） */
 val KEY_SHOW_COMPLETED = androidx.datastore.preferences.core.booleanPreferencesKey("show_completed")
@@ -83,7 +85,9 @@ class TodoWidget : GlanceAppWidget() {
         val bgMode = WidgetPrefs.bgMode(context)
         val solidAlpha = WidgetPrefs.solidAlpha(context)
         val wallpaperDim = WidgetPrefs.wallpaperDim(context)
-        val wallpaper: Bitmap? = if (bgMode == WidgetPrefs.BG_WALLPAPER) WallpaperCache.get(context) else null
+        val wallpaper: Bitmap? = if (bgMode == WidgetPrefs.BG_WALLPAPER) {
+            withContext(Dispatchers.IO) { WallpaperCache.get(context) }
+        } else null
         val cropRect = if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
             WidgetPrefs.cropRect(context, appWidgetId)
         } else null

@@ -1,6 +1,9 @@
 package com.gametodolist.ui.settings
 
+import android.content.Intent
 import android.graphics.Bitmap
+import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
@@ -24,6 +27,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material3.Button
+import androidx.compose.material3.Card
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -35,20 +39,28 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gametodolist.domain.WallpaperCrop
 import com.gametodolist.widget.WidgetPrefs
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 @Composable
 fun SettingsScreen(
@@ -57,6 +69,17 @@ fun SettingsScreen(
 ) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val wallpaper by viewModel.wallpaper.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    // 从系统设置页返回后刷新精确闹钟授权状态
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshExactAlarmState()
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     val pickImage = rememberLauncherForActivityResult(
         ActivityResultContracts.PickVisualMedia()
@@ -106,6 +129,32 @@ fun SettingsScreen(
 
             HorizontalDivider()
             Spacer(Modifier.height(4.dp))
+
+            // ---- 精确闹钟授权提示（仅未授权时显示） ----
+            if (!state.exactAlarmGranted) {
+                Card(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text("精确提醒未开启", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                "系统未授权精确闹钟，提醒可能延迟",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                        TextButton(onClick = {
+                            if (Build.VERSION.SDK_INT >= 31) {
+                                context.startActivity(
+                                    Intent(Settings.ACTION_REQUEST_SCHEDULE_EXACT_ALARM)
+                                )
+                            }
+                        }) { Text("去开启") }
+                    }
+                }
+            }
 
             // ---- 桌面小组件 ----
             Text("桌面小组件", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
@@ -192,7 +241,8 @@ private fun WallpaperSection(
             )
         } else {
             Text(
-                "尚未设置壁纸，点击上方按钮选择一张图片",
+                if (state.wallpaperError) "壁纸读取失败，请重新选择"
+                else "尚未设置壁纸，点击上方按钮选择一张图片",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -209,23 +259,25 @@ private fun WallpaperPreview(bitmap: Bitmap, dim: Float, cropRect: List<Float>?)
 
     // 与小组件一致的裁剪：自定义区域优先，否则按预览框比例居中裁剪
     val previewAspect = 2.4f
-    val cropped = remember(bitmap, cropRect) {
-        runCatching {
-            if (cropRect != null && cropRect.size == 4) {
-                Bitmap.createBitmap(
-                    bitmap,
-                    (cropRect[0] * bitmap.width).toInt().coerceIn(0, bitmap.width - 1),
-                    (cropRect[1] * bitmap.height).toInt().coerceIn(0, bitmap.height - 1),
-                    ((cropRect[2] - cropRect[0]) * bitmap.width).toInt()
-                        .coerceIn(1, bitmap.width - (cropRect[0] * bitmap.width).toInt()),
-                    ((cropRect[3] - cropRect[1]) * bitmap.height).toInt()
-                        .coerceIn(1, bitmap.height - (cropRect[1] * bitmap.height).toInt())
-                ).asImageBitmap()
-            } else {
-                val r = WallpaperCrop.cropRect(bitmap.width, bitmap.height, previewAspect, 0.5f, 0.5f)
-                Bitmap.createBitmap(bitmap, r[0], r[1], r[2], r[3]).asImageBitmap()
-            }
-        }.getOrNull()
+    val cropped by produceState<ImageBitmap?>(null, bitmap, cropRect) {
+        value = withContext(Dispatchers.Default) {
+            runCatching {
+                if (cropRect != null && cropRect.size == 4) {
+                    Bitmap.createBitmap(
+                        bitmap,
+                        (cropRect[0] * bitmap.width).toInt().coerceIn(0, bitmap.width - 1),
+                        (cropRect[1] * bitmap.height).toInt().coerceIn(0, bitmap.height - 1),
+                        ((cropRect[2] - cropRect[0]) * bitmap.width).toInt()
+                            .coerceIn(1, bitmap.width - (cropRect[0] * bitmap.width).toInt()),
+                        ((cropRect[3] - cropRect[1]) * bitmap.height).toInt()
+                            .coerceIn(1, bitmap.height - (cropRect[1] * bitmap.height).toInt())
+                    ).asImageBitmap()
+                } else {
+                    val r = WallpaperCrop.cropRect(bitmap.width, bitmap.height, previewAspect, 0.5f, 0.5f)
+                    Bitmap.createBitmap(bitmap, r[0], r[1], r[2], r[3]).asImageBitmap()
+                }
+            }.getOrNull()
+        }
     }
 
     Box(
@@ -234,9 +286,9 @@ private fun WallpaperPreview(bitmap: Bitmap, dim: Float, cropRect: List<Float>?)
             .aspectRatio(previewAspect)
             .clip(RoundedCornerShape(12.dp))
     ) {
-        if (cropped != null) {
+        cropped?.let { preview ->
             Image(
-                bitmap = cropped,
+                bitmap = preview,
                 contentDescription = "壁纸亮度预览",
                 contentScale = ContentScale.FillBounds,
                 modifier = Modifier.fillMaxSize()

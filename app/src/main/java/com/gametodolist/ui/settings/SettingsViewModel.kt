@@ -6,6 +6,7 @@ import android.graphics.BitmapFactory
 import android.net.Uri
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.gametodolist.notify.ReminderScheduler
 import com.gametodolist.widget.WidgetPrefs
 import com.gametodolist.widget.WidgetUpdater
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -25,12 +26,15 @@ data class WidgetSettingsUiState(
     val wallpaperDim: Int = 30,    // 0..60 %
     val hasWallpaper: Boolean = false,
     /** 任一组件实例的壁纸裁剪区域（0..1 比例），用于预览与组件保持一致；null = 居中裁剪 */
-    val cropRect: List<Float>? = null
+    val cropRect: List<Float>? = null,
+    val exactAlarmGranted: Boolean = true,
+    val wallpaperError: Boolean = false
 )
 
 @HiltViewModel
 class SettingsViewModel @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val reminderScheduler: ReminderScheduler
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(loadState())
@@ -41,7 +45,13 @@ class SettingsViewModel @Inject constructor(
     val wallpaper: StateFlow<Bitmap?> = _wallpaper.asStateFlow()
 
     init {
-        viewModelScope.launch { _wallpaper.value = decodeWallpaper() }
+        viewModelScope.launch {
+            val bmp = decodeWallpaper()
+            _wallpaper.value = bmp
+            if (WidgetPrefs.hasWallpaper(context) && bmp == null) {
+                _uiState.update { it.copy(wallpaperError = true) }
+            }
+        }
     }
 
     private fun loadState() = WidgetSettingsUiState(
@@ -49,8 +59,14 @@ class SettingsViewModel @Inject constructor(
         solidAlpha = WidgetPrefs.prefs(context).getInt(WidgetPrefs.KEY_SOLID_ALPHA, 100),
         wallpaperDim = WidgetPrefs.prefs(context).getInt(WidgetPrefs.KEY_WALLPAPER_DIM, 30),
         hasWallpaper = WidgetPrefs.hasWallpaper(context),
-        cropRect = WidgetPrefs.anyCropRect(context)?.toList()
+        cropRect = WidgetPrefs.anyCropRect(context)?.toList(),
+        exactAlarmGranted = reminderScheduler.canScheduleExactReminders()
     )
+
+    /** 从系统设置页返回后刷新精确闹钟授权状态 */
+    fun refreshExactAlarmState() {
+        _uiState.update { it.copy(exactAlarmGranted = reminderScheduler.canScheduleExactReminders()) }
+    }
 
     private suspend fun decodeWallpaper(): Bitmap? = withContext(Dispatchers.IO) {
         if (WidgetPrefs.hasWallpaper(context)) {
@@ -100,7 +116,10 @@ class SettingsViewModel @Inject constructor(
                     true
                 }.getOrDefault(false)
             }
-            if (!saved) return@launch
+            if (!saved) {
+                _uiState.update { it.copy(wallpaperError = true) }
+                return@launch
+            }
             // 有壁纸后自动切到壁纸模式
             WidgetPrefs.prefs(context).edit()
                 .putInt(WidgetPrefs.KEY_BG_MODE, WidgetPrefs.BG_WALLPAPER).apply()

@@ -209,4 +209,99 @@ class RolloverManagerTest {
         val active = instances.instances.single { it.status == InstanceStatus.ACTIVE.name }
         assertEquals(millisOf(LocalDate.of(2025, 1, 8)), active.cycleStart)
     }
+
+    @Test
+    fun `不循环带持续天数 开始日期在过去 创建即作废`() = runTest {
+        val template = TaskTemplateEntity(
+            id = 1, categoryId = null, title = "一次性", recurrenceType = "NONE",
+            windowMode = "CUSTOM", customWindowDays = 3,
+            anchorDate = millisOf(LocalDate.of(2025, 1, 1))
+        )
+        val instances = FakeInstanceDao()
+        val m = manager(mutableListOf(template), instances)
+
+        // 1-10 才首次结算：窗口 [1-1, 1-4) 早已过期，应立即作废而不是挂着 ACTIVE
+        m.rolloverAll(millisOf(LocalDate.of(2025, 1, 10), 10), zone)
+
+        assertEquals(1, instances.instances.size)
+        assertEquals(InstanceStatus.EXPIRED.name, instances.instances[0].status)
+    }
+
+    @Test
+    fun `编辑把不循环任务开始日期改到过去 立即作废`() = runTest {
+        val template = TaskTemplateEntity(
+            id = 1, categoryId = null, title = "一次性", recurrenceType = "NONE",
+            windowMode = "CUSTOM", customWindowDays = 3,
+            anchorDate = millisOf(LocalDate.of(2025, 1, 9))
+        )
+        val instances = FakeInstanceDao()
+        val m = manager(mutableListOf(template), instances)
+        m.rolloverAll(millisOf(LocalDate.of(2025, 1, 10), 10), zone)
+        assertEquals(InstanceStatus.ACTIVE.name, instances.instances[0].status)
+
+        // 用户把开始日期改到 1-01（窗口 [1-1,1-4) 已过期），保存触发 regenerate
+        m.regenerateActiveInstance(
+            template.copy(anchorDate = millisOf(LocalDate.of(2025, 1, 1))),
+            millisOf(LocalDate.of(2025, 1, 10), 10), zone
+        )
+
+        assertEquals(InstanceStatus.EXPIRED.name, instances.instances[0].status)
+    }
+
+    @Test
+    fun `编辑改每周规则导致循环起点变化 旧实例作废并生成新循环`() = runTest {
+        val instances = FakeInstanceDao()
+        val m = manager(mutableListOf(weeklyTemplate()), instances)
+        // 2025-01-09 周四：当前循环起点周三 1-08
+        m.rolloverAll(millisOf(LocalDate.of(2025, 1, 9), 10), zone)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 8)), instances.instances[0].cycleStart)
+
+        // 规则从「周一+周三」改成「周二+周四」：当前循环起点应变更为周二 1-07？不——
+        // 周二 1-07 < 周四 1-09 回推命中周二 1-07？（0..6 回推：1-09 是周四，减2天=周二 1-07 命中）
+        // 旧实例（起点周三）作废，新实例起点周二
+        m.regenerateActiveInstance(
+            weeklyTemplate().copy(weekdaysMask = 0b0001010), // 周二 + 周四
+            millisOf(LocalDate.of(2025, 1, 9), 10), zone
+        )
+
+        val expired = instances.instances.filter { it.status == InstanceStatus.EXPIRED.name }
+        val active = instances.instances.filter { it.status == InstanceStatus.ACTIVE.name }
+        assertEquals(1, expired.size)
+        assertEquals(1, active.size)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 9)), active[0].cycleStart) // 周四命中
+        assertEquals(millisOf(LocalDate.of(2025, 1, 14)), active[0].windowEnd) // 下一锚点周二
+    }
+
+    @Test
+    fun `编辑已完成模板且当前循环已过期 结算补出新循环`() = runTest {
+        val instances = FakeInstanceDao(
+            mutableListOf(
+                TaskInstanceEntity(
+                    id = 1, templateId = 1,
+                    cycleStart = millisOf(LocalDate.of(2025, 1, 6)),
+                    windowStart = millisOf(LocalDate.of(2025, 1, 6)),
+                    windowEnd = millisOf(LocalDate.of(2025, 1, 8)),
+                    status = "COMPLETED", completedAt = millisOf(LocalDate.of(2025, 1, 7))
+                )
+            )
+        )
+        val m = manager(mutableListOf(weeklyTemplate()), instances)
+
+        m.regenerateActiveInstance(weeklyTemplate(), millisOf(LocalDate.of(2025, 1, 10), 10), zone)
+
+        assertEquals(1, instances.instances.count { it.status == InstanceStatus.COMPLETED.name })
+        val active = instances.instances.single { it.status == InstanceStatus.ACTIVE.name }
+        assertEquals(millisOf(LocalDate.of(2025, 1, 8)), active.cycleStart)
+    }
+
+    @Test
+    fun `regenerate 无实例时按规则建新实例`() = runTest {
+        val instances = FakeInstanceDao()
+        val m = manager(mutableListOf(weeklyTemplate()), instances)
+
+        m.regenerateActiveInstance(weeklyTemplate(), millisOf(LocalDate.of(2025, 1, 9), 10), zone)
+
+        assertEquals(1, instances.instances.size)
+        assertEquals(InstanceStatus.ACTIVE.name, instances.instances[0].status)
+    }
 }

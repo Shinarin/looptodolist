@@ -173,4 +173,68 @@ class RecurrenceEngineTest {
         assertEquals(millisOf(monday), window.startMillis)
         assertEquals(millisOf(monday.plusDays(3)), window.endMillis)
     }
+
+    // ---------- WEEKLY/MONTHLY 起始日期 ----------
+
+    @Test
+    fun `weekly 起始日期在未来 首个循环不早于起始日期`() {
+        // mask=周一，anchor=2025-01-08 周三 → 首个循环 = 下周一 1-13
+        val anchor = LocalDate.of(2025, 1, 8)
+        val t = template(
+            "WEEKLY", weekdaysMask = 0b0000001,
+            anchorDate = anchor.atStartOfDay(zone).toInstant().toEpochMilli()
+        )
+        // 查询 anchor 当天（周三）：正常回推得 1-06，但被钳到首个循环 1-13
+        assertEquals(LocalDate.of(2025, 1, 13), RecurrenceEngine.currentCycleStartDate(anchor, t, zone))
+        // 查询 1-20：正常回推 1-20（周一），≥ first，不受影响
+        assertEquals(LocalDate.of(2025, 1, 20), RecurrenceEngine.currentCycleStartDate(LocalDate.of(2025, 1, 20), t, zone))
+    }
+
+    @Test
+    fun `weekly 起始日期在过去 行为与未设置一致`() {
+        val anchor = LocalDate.of(2024, 12, 1)
+        val t = template(
+            "WEEKLY", weekdaysMask = 0b0000101,
+            anchorDate = anchor.atStartOfDay(zone).toInstant().toEpochMilli()
+        )
+        assertEquals(monday, RecurrenceEngine.currentCycleStartDate(LocalDate.of(2025, 1, 7), t, zone))
+    }
+
+    @Test
+    fun `monthly 起始日期约束首个循环`() {
+        // monthDay=15，anchor=2025-03-20 → 3-15 已过，首个循环 = 4-15
+        val anchor = LocalDate.of(2025, 3, 20)
+        val t = template(
+            "MONTHLY", monthDay = 15,
+            anchorDate = anchor.atStartOfDay(zone).toInstant().toEpochMilli()
+        )
+        assertEquals(LocalDate.of(2025, 4, 15), RecurrenceEngine.currentCycleStartDate(anchor, t, zone))
+        // 5 月后正常
+        assertEquals(LocalDate.of(2025, 5, 15), RecurrenceEngine.currentCycleStartDate(LocalDate.of(2025, 5, 20), t, zone))
+    }
+
+    @Test
+    fun `monthly 起始日期与月末钳制`() {
+        // monthDay=31，anchor=2025-02-10（非闰年）→ 首个循环 = 2-28
+        val anchor = LocalDate.of(2025, 2, 10)
+        val t = template(
+            "MONTHLY", monthDay = 31,
+            anchorDate = anchor.atStartOfDay(zone).toInstant().toEpochMilli()
+        )
+        assertEquals(LocalDate.of(2025, 2, 28), RecurrenceEngine.currentCycleStartDate(anchor, t, zone))
+    }
+
+    @Test
+    fun `DST 时区窗口换算日期正确`() {
+        val ny = ZoneId.of("America/New_York")
+        // 2025-03-09 美国进入夏令时；窗口跨 3-08 → 3-10 两天
+        val t = template("NONE", windowMode = "CUSTOM", customWindowDays = 2,
+            anchorDate = LocalDate.of(2025, 3, 8).atStartOfDay(ny).toInstant().toEpochMilli())
+        val cycle = RecurrenceEngine.currentCycleStartDate(LocalDate.of(2025, 3, 8), t, ny)
+        val window = RecurrenceEngine.computeWindow(cycle, t, ny)
+        val startDate = java.time.Instant.ofEpochMilli(window.startMillis).atZone(ny).toLocalDate()
+        val endDate = java.time.Instant.ofEpochMilli(window.endMillis).atZone(ny).toLocalDate()
+        assertEquals(LocalDate.of(2025, 3, 8), startDate)
+        assertEquals(LocalDate.of(2025, 3, 10), endDate)
+    }
 }

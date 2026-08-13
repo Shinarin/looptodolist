@@ -16,6 +16,8 @@ data class TimeWindow(val startMillis: Long, val endMillis: Long)
  * - INTERVAL_DAYS：以模板创建日为锚，每 N 天一个循环
  * - WEEKLY：weekdaysMask 中被选中的每个星期几都是循环起点
  * - MONTHLY：每月 monthDay 日（短月钳制到月末）为循环起点
+ * - WEEKLY/MONTHLY 设置了 anchorDate 时：首个循环不早于 anchor（之前无循环）；
+ *   日号/星期规则不变，anchor <= 0 时行为与未设置一致
  *
  * 显示窗口：
  * - FULL_CYCLE：[本次循环起点 00:00, 下次循环起点 00:00)
@@ -31,6 +33,19 @@ object RecurrenceEngine {
 
     private fun clampMonthDay(day: Int, month: LocalDate): LocalDate =
         month.withDayOfMonth(day.coerceIn(1, month.lengthOfMonth()))
+
+    /** WEEKLY：不早于 anchor 的第一个循环起点（anchor<=0 调用方不会走到这） */
+    private fun firstWeeklyCycleOnOrAfter(anchor: LocalDate, t: TaskTemplateEntity): LocalDate =
+        (0..6).asSequence()
+            .map { anchor.plusDays(it.toLong()) }
+            .first { isWeekdaySelected(it, t.weekdaysMask) }
+
+    /** MONTHLY：不早于 anchor 的第一个循环起点（日号按 monthDay，短月钳制） */
+    private fun firstMonthlyCycleOnOrAfter(anchor: LocalDate, t: TaskTemplateEntity): LocalDate {
+        val sameMonth = clampMonthDay(t.monthDay, anchor)
+        return if (sameMonth >= anchor) sameMonth
+        else clampMonthDay(t.monthDay, anchor.plusMonths(1))
+    }
 
     /** 循环锚点日期：优先用户设置的起始日期，否则用创建时间 */
     private fun anchorDateOf(t: TaskTemplateEntity, zone: ZoneId): LocalDate {
@@ -68,14 +83,18 @@ object RecurrenceEngine {
             }
             RecurrenceType.WEEKLY -> {
                 require(t.weekdaysMask != 0) { "WEEKLY 规则 weekdaysMask 不能为 0" }
-                (0..6).asSequence()
+                val current = (0..6).asSequence()
                     .map { date.minusDays(it.toLong()) }
                     .first { isWeekdaySelected(it, t.weekdaysMask) }
+                if (t.anchorDate > 0) maxOf(current, firstWeeklyCycleOnOrAfter(anchorDateOf(t, zone), t))
+                else current
             }
             RecurrenceType.MONTHLY -> {
                 val thisMonth = clampMonthDay(t.monthDay, date)
-                if (thisMonth <= date) thisMonth
+                val current = if (thisMonth <= date) thisMonth
                 else clampMonthDay(t.monthDay, date.minusMonths(1))
+                if (t.anchorDate > 0) maxOf(current, firstMonthlyCycleOnOrAfter(anchorDateOf(t, zone), t))
+                else current
             }
         }
 

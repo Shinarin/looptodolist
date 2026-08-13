@@ -70,9 +70,11 @@ class WidgetCropActivity : ComponentActivity() {
             ?: widgetAspectFromSystem(appWidgetId)
             ?: 1.4f
 
-        setResult(RESULT_CANCELED) // configure 流程默认取消，保存成功时改 OK
+        // configure 流程（API 26-30 添加组件时系统强制经过本页）：取消/返回/无壁纸都放行添加
+        // （RESULT_CANCELED 会让组件加不上桌面），壁纸用默认居中裁剪，之后可随时再裁剪
+        setResult(RESULT_OK, android.content.Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId))
         if (!WidgetPrefs.hasWallpaper(this)) {
-            // 未设壁纸时裁剪无意义（低版本首次添加组件会被系统强制拉起到此）
+            // 未设壁纸时裁剪无意义，直接放行
             finish()
             return
         }
@@ -130,6 +132,7 @@ private fun CropScreen(
                 .padding(horizontal = 8.dp, vertical = 4.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // 取消也放行添加（默认 RESULT_OK），仅表示放弃裁剪
             TextButton(onClick = onClose) { Text("取消") }
             Text(
                 "裁剪壁纸",

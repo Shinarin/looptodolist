@@ -53,6 +53,9 @@ private class FakeInstanceDao(val instances: MutableList<TaskInstanceEntity> = m
         instances.replaceAll { if (it.id == id) it.copy(status = "ACTIVE", completedAt = null) else it }
     }
     override suspend fun getById(id: Long): TaskInstanceEntity? = instances.find { it.id == id }
+    override suspend fun findByCycle(templateId: Long, cycleStart: Long): TaskInstanceEntity? =
+        instances.find { it.templateId == templateId && it.cycleStart == cycleStart }
+    override suspend fun deleteById(id: Long) { instances.removeAll { it.id == id } }
     override suspend fun insert(instance: TaskInstanceEntity): Long {
         val id = if (instance.id == 0L) (instances.maxOfOrNull { it.id } ?: 0) + 1 else instance.id
         instances.removeAll { it.id == id }
@@ -256,9 +259,8 @@ class RolloverManagerTest {
         m.rolloverAll(millisOf(LocalDate.of(2025, 1, 9), 10), zone)
         assertEquals(millisOf(LocalDate.of(2025, 1, 8)), instances.instances[0].cycleStart)
 
-        // 规则从「周一+周三」改成「周二+周四」：当前循环起点应变更为周二 1-07？不——
-        // 周二 1-07 < 周四 1-09 回推命中周二 1-07？（0..6 回推：1-09 是周四，减2天=周二 1-07 命中）
-        // 旧实例（起点周三）作废，新实例起点周二
+        // 规则从「周一+周三」改成「周二+周四」：周四 1-09 回推 0 天即命中周四本身（起点前移），
+        // 旧实例（起点周三 1-08）作废，新实例起点周四 1-09，窗口到下一命中日周二 1-14
         m.regenerateActiveInstance(
             weeklyTemplate().copy(weekdaysMask = 0b0001010), // 周二 + 周四
             millisOf(LocalDate.of(2025, 1, 9), 10), zone
@@ -303,5 +305,72 @@ class RolloverManagerTest {
 
         assertEquals(1, instances.instances.size)
         assertEquals(InstanceStatus.ACTIVE.name, instances.instances[0].status)
+    }
+
+    @Test
+    fun `编辑规则起点后移且目标循环有历史 保留历史并删除幻影实例`() = runTest {
+        val instances = FakeInstanceDao(
+            mutableListOf(
+                TaskInstanceEntity(
+                    id = 1, templateId = 1,
+                    cycleStart = millisOf(LocalDate.of(2025, 1, 6)),   // 周一（历史已完成）
+                    windowStart = millisOf(LocalDate.of(2025, 1, 6)),
+                    windowEnd = millisOf(LocalDate.of(2025, 1, 8)),
+                    status = "COMPLETED", completedAt = millisOf(LocalDate.of(2025, 1, 7))
+                ),
+                TaskInstanceEntity(
+                    id = 2, templateId = 1,
+                    cycleStart = millisOf(LocalDate.of(2025, 1, 8)),   // 周三（当前 ACTIVE）
+                    windowStart = millisOf(LocalDate.of(2025, 1, 8)),
+                    windowEnd = millisOf(LocalDate.of(2025, 1, 13)),
+                    status = "ACTIVE"
+                )
+            )
+        )
+        val m = manager(mutableListOf(weeklyTemplate()), instances)
+
+        // 规则从「周一+周三」改成「仅周一」，今天周三 1-08：新当前循环起点 = 周一 1-06（后移且有历史）
+        m.regenerateActiveInstance(
+            weeklyTemplate().copy(weekdaysMask = 0b0000001),
+            millisOf(LocalDate.of(2025, 1, 8), 10), zone
+        )
+
+        // 历史 COMPLETED 原样保留（completedAt 不丢），幻影 ACTIVE 被删除；
+        // 结算随后按新规则补出下一循环（周一 1-13）
+        assertEquals(2, instances.instances.size)
+        val kept = instances.instances.single { it.status == InstanceStatus.COMPLETED.name }
+        assertEquals(millisOf(LocalDate.of(2025, 1, 7)), kept.completedAt)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 6)), kept.cycleStart)
+        val next = instances.instances.single { it.status == InstanceStatus.ACTIVE.name }
+        assertEquals(millisOf(LocalDate.of(2025, 1, 13)), next.cycleStart)
+    }
+
+    @Test
+    fun `编辑规则起点后移且目标循环无历史 幻影实例就地改挂新起点`() = runTest {
+        val instances = FakeInstanceDao(
+            mutableListOf(
+                TaskInstanceEntity(
+                    id = 2, templateId = 1,
+                    cycleStart = millisOf(LocalDate.of(2025, 1, 8)),   // 周三（当前 ACTIVE）
+                    windowStart = millisOf(LocalDate.of(2025, 1, 8)),
+                    windowEnd = millisOf(LocalDate.of(2025, 1, 13)),
+                    status = "ACTIVE"
+                )
+            )
+        )
+        val m = manager(mutableListOf(weeklyTemplate()), instances)
+
+        // 规则改成「仅周五」，今天周三 1-08：回推命中上周五 1-03（后移且无历史）
+        m.regenerateActiveInstance(
+            weeklyTemplate().copy(weekdaysMask = 0b0010000),
+            millisOf(LocalDate.of(2025, 1, 8), 10), zone
+        )
+
+        // 同一条实例被改挂：cycleStart=1-03，窗口按新规则到下一周五 1-10
+        assertEquals(1, instances.instances.size)
+        val inst = instances.instances[0]
+        assertEquals(InstanceStatus.ACTIVE.name, inst.status)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 3)), inst.cycleStart)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 10)), inst.windowEnd)
     }
 }

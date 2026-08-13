@@ -41,6 +41,12 @@ interface TaskInstanceDao {
     @Query("SELECT * FROM task_instances WHERE id = :id")
     suspend fun getById(id: Long): TaskInstanceEntity?
 
+    @Query("SELECT * FROM task_instances WHERE templateId = :templateId AND cycleStart = :cycleStart LIMIT 1")
+    suspend fun findByCycle(templateId: Long, cycleStart: Long): TaskInstanceEntity?
+
+    @Query("DELETE FROM task_instances WHERE id = :id")
+    suspend fun deleteById(id: Long)
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insert(instance: TaskInstanceEntity): Long
 

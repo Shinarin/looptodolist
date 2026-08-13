@@ -99,10 +99,33 @@ class RolloverManager @Inject constructor(
             val expected = RecurrenceEngine.currentCycleStartDate(today, template, zone)
             val latestCycle = Instant.ofEpochMilli(latest.cycleStart).atZone(zone).toLocalDate()
             if (template.recurrenceType.toRecurrenceType() != RecurrenceType.NONE && latestCycle != expected) {
-                // 规则起点变了（如每周一三 → 周二四）：旧实例作废弃置，
-                // 并立即按新规则建当前循环实例——rollover 只按窗口过期推进，不会主动建
-                instanceDao.markExpired(latest.id)
-                expireIfPastDue(insertInstance(template, expected, zone), nowMillis)
+                val expectedStart = expected.atStartOfDay(zone).toInstant().toEpochMilli()
+                val existing = instanceDao.findByCycle(template.id, expectedStart)
+                when {
+                    existing != null -> {
+                        // 目标循环已有历史实例：保留历史（COMPLETED/EXPIRED 不动），
+                        // 删除旧规则下的幻影实例，避免 REPLACE 撞唯一索引销毁历史
+                        instanceDao.deleteById(latest.id)
+                    }
+                    expected > latestCycle -> {
+                        // 起点前移（旧循环起点在新规则下已过时）：作废弃置留痕，按新规则建新实例
+                        instanceDao.markExpired(latest.id)
+                        expireIfPastDue(insertInstance(template, expected, zone), nowMillis)
+                    }
+                    else -> {
+                        // 起点后移且目标循环无历史：幻影实例就地改挂到新起点，
+                        // 避免主页按最大 cycleStart 取到已作废实例而隐身
+                        val window = RecurrenceEngine.computeWindow(expected, template, zone)
+                        instanceDao.update(
+                            latest.copy(
+                                cycleStart = expectedStart,
+                                windowStart = window.startMillis,
+                                windowEnd = window.endMillis
+                            )
+                        )
+                        instanceDao.getById(latest.id)?.let { expireIfPastDue(it, nowMillis) }
+                    }
+                }
             } else {
                 // 同循环（或 NONE 换开始日期/天数）：就地重算窗口
                 val window = RecurrenceEngine.computeWindow(expected, template, zone)

@@ -40,7 +40,9 @@ class TodoRepository @Inject constructor(
     // ---------- 分类 ----------
     fun observeCategories(): Flow<List<CategoryEntity>> = categoryDao.observeAll()
 
-    suspend fun upsertCategory(category: CategoryEntity): Long = categoryDao.insert(category)
+    suspend fun upsertCategory(category: CategoryEntity): Long =
+        if (category.id == 0L) categoryDao.insert(category)
+        else { categoryDao.update(category); category.id }
 
     suspend fun deleteCategory(category: CategoryEntity) {
         templateDao.clearCategory(category.id)
@@ -52,7 +54,9 @@ class TodoRepository @Inject constructor(
     // ---------- 清单模板 ----------
     suspend fun getTemplate(id: Long): TaskTemplateEntity? = templateDao.getById(id)
 
-    suspend fun saveTemplate(template: TaskTemplateEntity): Long = templateDao.insert(template)
+    suspend fun saveTemplate(template: TaskTemplateEntity): Long =
+        if (template.id == 0L) templateDao.insert(template)
+        else { templateDao.update(template); template.id }
 
     suspend fun deleteTemplate(id: Long) = templateDao.deleteById(id)
 

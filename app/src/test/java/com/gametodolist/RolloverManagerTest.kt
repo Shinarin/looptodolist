@@ -24,12 +24,14 @@ private class FakeTemplateDao(private val templates: MutableList<TaskTemplateEnt
     override suspend fun getActive(): List<TaskTemplateEntity> = templates.filter { !it.archived }
     override suspend fun getById(id: Long): TaskTemplateEntity? = templates.find { it.id == id }
     override suspend fun insert(template: TaskTemplateEntity): Long {
-        val id = if (template.id == 0L) (templates.maxOfOrNull { it.id } ?: 0) + 1 else template.id
-        templates.removeAll { it.id == id }
+        val id = (templates.maxOfOrNull { it.id } ?: 0) + 1
         templates.add(template.copy(id = id))
         return id
     }
-    override suspend fun update(template: TaskTemplateEntity) { insert(template) }
+    override suspend fun update(template: TaskTemplateEntity) {
+        templates.removeAll { it.id == template.id }
+        templates.add(template)
+    }
     override suspend fun archive(id: Long) {
         templates.replaceAll { if (it.id == id) it.copy(archived = true) else it }
     }

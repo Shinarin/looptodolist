@@ -2,7 +2,6 @@ package com.gametodolist.data.dao
 
 import androidx.room.Dao
 import androidx.room.Insert
-import androidx.room.OnConflictStrategy
 import androidx.room.Query
 import androidx.room.Update
 import com.gametodolist.data.entity.TaskTemplateEntity
@@ -19,7 +18,7 @@ interface TaskTemplateDao {
     @Query("SELECT * FROM task_templates WHERE id = :id")
     suspend fun getById(id: Long): TaskTemplateEntity?
 
-    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    @Insert
     suspend fun insert(template: TaskTemplateEntity): Long
 
     @Update

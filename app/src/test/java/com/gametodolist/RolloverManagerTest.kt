@@ -373,4 +373,28 @@ class RolloverManagerTest {
         assertEquals(millisOf(LocalDate.of(2025, 1, 3)), inst.cycleStart)
         assertEquals(millisOf(LocalDate.of(2025, 1, 10)), inst.windowEnd)
     }
+
+    @Test
+    fun `复活已作废的不循环任务 窗口从今天重算`() = runTest {
+        val template = TaskTemplateEntity(
+            id = 1, categoryId = null, title = "一次性", recurrenceType = "NONE",
+            windowMode = "CUSTOM", customWindowDays = 3,
+            anchorDate = millisOf(LocalDate.of(2025, 1, 1))
+        )
+        val instances = FakeInstanceDao()
+        val m = manager(mutableListOf(template), instances)
+        m.rolloverAll(millisOf(LocalDate.of(2025, 1, 10), 10), zone)
+        assertEquals(InstanceStatus.EXPIRED.name, instances.instances[0].status)
+
+        // 用户点「重新开启」：ViewModel 已把 anchor 更新为今天（1-10）
+        m.reviveTemplate(
+            template.copy(anchorDate = millisOf(LocalDate.of(2025, 1, 10))),
+            millisOf(LocalDate.of(2025, 1, 10), 12), zone
+        )
+
+        val revived = instances.instances[0]
+        assertEquals(InstanceStatus.ACTIVE.name, revived.status)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 10)), revived.windowStart)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 13)), revived.windowEnd)
+    }
 }

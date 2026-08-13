@@ -49,6 +49,18 @@ class RolloverManager @Inject constructor(
         zone: ZoneId = ZoneId.systemDefault()
     ) = mutex.withLock { regenerateLocked(template, nowMillis, zone) }
 
+    /** 「重新开启」已作废任务：最新 EXPIRED 实例改回 ACTIVE 并按当前规则（新 anchor）重算窗口 */
+    suspend fun reviveTemplate(
+        template: TaskTemplateEntity,
+        nowMillis: Long = System.currentTimeMillis(),
+        zone: ZoneId = ZoneId.systemDefault()
+    ) = mutex.withLock {
+        val latest = instanceDao.getLatestForTemplate(template.id) ?: return@withLock
+        if (latest.status != InstanceStatus.EXPIRED.name) return@withLock
+        instanceDao.markActive(latest.id)
+        regenerateLocked(template, nowMillis, zone)
+    }
+
     // ---------- 私有实现（调用方须已持锁） ----------
 
     private suspend fun rolloverTemplateLocked(

@@ -6,6 +6,7 @@ import com.gametodolist.data.AppDatabase
 import com.gametodolist.data.TodoRepository
 import com.gametodolist.data.entity.TaskInstanceEntity
 import com.gametodolist.data.entity.TaskTemplateEntity
+import com.gametodolist.domain.RolloverManager
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -38,7 +39,12 @@ class RoomIntegrationTest {
     fun `编辑模板保留全部历史实例`() = runTest {
         val templateDao = db.taskTemplateDao()
         val instanceDao = db.taskInstanceDao()
-        val repository = TodoRepository(db.categoryDao(), templateDao, instanceDao)
+        val repository = TodoRepository(
+            db.categoryDao(),
+            templateDao,
+            instanceDao,
+            RolloverManager(templateDao, instanceDao)
+        )
         val id = templateDao.insert(
             TaskTemplateEntity(categoryId = null, title = "原始", recurrenceType = "WEEKLY", weekdaysMask = 1)
         )

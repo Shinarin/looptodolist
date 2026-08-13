@@ -10,4 +10,4 @@
     android:widgetCategory="home_screen"
     android:configure="com.gametodolist.widget.WidgetCropActivity"
     android:widgetFeatures="reconfigurable|configuration_optional"
-    android:description="@string/app_name" />
+    android:description="@string/widget_description" />

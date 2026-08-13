@@ -54,6 +54,15 @@ object WidgetPrefs {
             .putInt(KEY_CROP_PREFIX + appWidgetId + "_b", (b.coerceIn(0f, 1f) * 1000).toInt())
             .apply()
 
+    /** 组件实例删除后清理其裁剪区域键，避免长期残留 */
+    fun clearCropRect(context: Context, appWidgetId: Int) {
+        val base = KEY_CROP_PREFIX + appWidgetId
+        prefs(context).edit()
+            .remove(base + "_l").remove(base + "_t")
+            .remove(base + "_r").remove(base + "_b")
+            .apply()
+    }
+
     /** 任一组件实例的裁剪区域（设置页预览与组件保持一致用） */
     fun anyCropRect(context: Context): FloatArray? {
         val key = prefs(context).all.keys

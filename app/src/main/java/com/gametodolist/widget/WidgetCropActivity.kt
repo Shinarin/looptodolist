@@ -31,6 +31,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -45,10 +47,11 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.glance.appwidget.updateAll
+import androidx.lifecycle.lifecycleScope
 import com.gametodolist.ui.theme.GameTodoTheme
-import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlin.math.min
 
 /**
@@ -68,6 +71,11 @@ class WidgetCropActivity : ComponentActivity() {
             ?: 1.4f
 
         setResult(RESULT_CANCELED) // configure 流程默认取消，保存成功时改 OK
+        if (!WidgetPrefs.hasWallpaper(this)) {
+            // 未设壁纸时裁剪无意义（低版本首次添加组件会被系统强制拉起到此）
+            finish()
+            return
+        }
         setContent {
             GameTodoTheme {
                 CropScreen(
@@ -87,7 +95,8 @@ class WidgetCropActivity : ComponentActivity() {
                 val sizes = AppWidgetManager.getInstance(this)
                     .getAppWidgetOptions(appWidgetId)
                     .getParcelableArrayList<android.util.SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
-                sizes?.firstOrNull()?.let { it.width / it.height }
+                sizes?.minByOrNull { kotlin.math.abs(it.width / it.height - 1.4f) }
+                    ?.let { it.width / it.height }
             } else null
         }.getOrNull()
     }
@@ -104,10 +113,12 @@ private fun CropScreen(
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
-    val bitmap = remember {
-        if (WidgetPrefs.hasWallpaper(context)) {
-            runCatching { BitmapFactory.decodeFile(WidgetPrefs.wallpaperFile(context).absolutePath) }.getOrNull()
-        } else null
+    val bitmap by produceState<Bitmap?>(null) {
+        value = withContext(Dispatchers.IO) {
+            if (WidgetPrefs.hasWallpaper(context)) {
+                runCatching { BitmapFactory.decodeFile(WidgetPrefs.wallpaperFile(context).absolutePath) }.getOrNull()
+            } else null
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
@@ -129,7 +140,8 @@ private fun CropScreen(
             Spacer(Modifier.width(64.dp)) // 与左侧取消按钮对称
         }
 
-        if (bitmap == null) {
+        val bmp = bitmap
+        if (bmp == null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Text(
                     "尚未设置壁纸，请先到 设置 → 桌面小组件 选择壁纸",
@@ -139,7 +151,7 @@ private fun CropScreen(
             }
         } else {
             CropArea(
-                bitmap = bitmap,
+                bitmap = bmp,
                 aspect = aspect,
                 appWidgetId = appWidgetId,
                 onClose = onClose
@@ -183,11 +195,11 @@ private fun CropArea(
         var boxScale by remember { mutableFloatStateOf(1f) }
         var centerX by remember { mutableFloatStateOf(0f) }  // 相对图片中心，px
         var centerY by remember { mutableFloatStateOf(0f) }
-        var initialized by remember { mutableFloatStateOf(0f) }
+        var initialized by remember { mutableStateOf(false) }
 
         // 已有裁剪则还原选框位置
-        if (initialized == 0f) {
-            initialized = 1f
+        if (!initialized) {
+            initialized = true
             WidgetPrefs.cropRect(context, appWidgetId)?.let { r ->
                 val w = (r[2] - r[0]) * dispW
                 boxScale = (w / baseW).coerceIn(0.25f, 1f)
@@ -271,8 +283,11 @@ private fun CropArea(
                 onClick = {
                     val r = currentRectFractions()
                     WidgetPrefs.setCropRect(context, appWidgetId, r[0], r[1], r[2], r[3])
-                    (context as? WidgetCropActivity)?.setResult(android.app.Activity.RESULT_OK)
-                    CoroutineScope(Dispatchers.Main).launch {
+                    (context as? WidgetCropActivity)?.setResult(
+                        android.app.Activity.RESULT_OK,
+                        android.content.Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                    )
+                    (context as? WidgetCropActivity)?.lifecycleScope?.launch {
                         runCatching { TodoWidget().updateAll(context) }
                     }
                     onClose()

@@ -1,5 +1,6 @@
 package com.gametodolist.ui.edit
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -19,7 +20,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.outlined.Tune
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.DatePicker
 import androidx.compose.material3.DatePickerDialog
@@ -72,6 +75,15 @@ fun TaskEditScreen(
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     val focusManager = LocalFocusManager.current
 
+    var showDiscardDialog by remember { mutableStateOf(false) }
+    var showDeleteDialog by remember { mutableStateOf(false) }
+
+    fun requestBack() {
+        if (viewModel.isDirty()) showDiscardDialog = true else onBack()
+    }
+
+    BackHandler { requestBack() }
+
     LaunchedEffect(state.saved) { if (state.saved) onBack() }
 
     val snackbarHostState = remember { SnackbarHostState() }
@@ -88,8 +100,16 @@ fun TaskEditScreen(
             TopAppBar(
                 title = { Text(if (state.id == 0L) "新增清单" else "编辑清单") },
                 navigationIcon = {
-                    IconButton(onClick = onBack) {
+                    IconButton(onClick = { requestBack() }) {
                         Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                    }
+                },
+                actions = {
+                    if (state.id != 0L) {
+                        IconButton(onClick = { showDeleteDialog = true }) {
+                            Icon(Icons.Default.Delete, contentDescription = "删除",
+                                tint = MaterialTheme.colorScheme.error)
+                        }
                     }
                 }
             )
@@ -278,6 +298,40 @@ fun TaskEditScreen(
 
             Spacer(Modifier.height(24.dp))
         }
+    }
+
+    if (showDiscardDialog) {
+        AlertDialog(
+            onDismissRequest = { showDiscardDialog = false },
+            title = { Text("放弃修改？") },
+            text = { Text("当前修改尚未保存，离开后不会保留。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDiscardDialog = false
+                    onBack()
+                }) { Text("放弃") }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDiscardDialog = false }) { Text("继续编辑") }
+            }
+        )
+    }
+
+    if (showDeleteDialog) {
+        AlertDialog(
+            onDismissRequest = { showDeleteDialog = false },
+            title = { Text("删除清单？") },
+            text = { Text("「${state.title}」及其历史记录、提醒将一并删除，无法恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    showDeleteDialog = false
+                    viewModel.delete()
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { showDeleteDialog = false }) { Text("取消") }
+            }
+        )
     }
 }
 

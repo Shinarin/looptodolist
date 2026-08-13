@@ -19,7 +19,10 @@ import androidx.room.PrimaryKey
             onDelete = ForeignKey.CASCADE
         )
     ],
-    indices = [Index("templateId"), Index("windowEnd"), Index("status")]
+    indices = [
+        Index("templateId"), Index("windowEnd"), Index("status"),
+        Index(value = ["templateId", "cycleStart"], unique = true)
+    ]
 )
 data class TaskInstanceEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0,

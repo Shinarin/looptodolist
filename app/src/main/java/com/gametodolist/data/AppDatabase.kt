@@ -11,8 +11,8 @@ import com.gametodolist.data.entity.TaskTemplateEntity
 
 @Database(
     entities = [CategoryEntity::class, TaskTemplateEntity::class, TaskInstanceEntity::class],
-    version = 2,
-    exportSchema = false
+    version = 3,
+    exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun categoryDao(): CategoryDao

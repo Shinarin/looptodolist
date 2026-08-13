@@ -9,6 +9,14 @@ enum class WindowMode { FULL_CYCLE, CUSTOM }
 /** 任务实例状态 */
 enum class InstanceStatus { ACTIVE, COMPLETED, EXPIRED }
 
+/** 数据库字符串 → 循环类型；非法/空值安全降级为 NONE */
+fun String?.toRecurrenceType(): RecurrenceType =
+    runCatching { RecurrenceType.valueOf(this.orEmpty()) }.getOrDefault(RecurrenceType.NONE)
+
+/** 数据库字符串 → 显示时段模式；非法/空值安全降级为 FULL_CYCLE */
+fun String?.toWindowMode(): WindowMode =
+    runCatching { WindowMode.valueOf(this.orEmpty()) }.getOrDefault(WindowMode.FULL_CYCLE)
+
 /** 预设分类色板（柔和配色） */
 val CATEGORY_COLOR_PRESETS: List<Long> = listOf(
     0xFF7FB69E, // 抹茶绿

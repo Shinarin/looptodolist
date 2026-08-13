@@ -2,6 +2,7 @@ package com.gametodolist.ui
 
 import com.gametodolist.data.entity.TaskTemplateEntity
 import com.gametodolist.domain.RecurrenceType
+import com.gametodolist.domain.toRecurrenceType
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
@@ -31,7 +32,7 @@ fun LocalDate.toEpochMillis(): Long =
 val WEEKDAY_LABELS = listOf("一", "二", "三", "四", "五", "六", "日")
 
 fun TaskTemplateEntity.recurrenceLabel(): String =
-    when (runCatching { RecurrenceType.valueOf(recurrenceType) }.getOrDefault(RecurrenceType.NONE)) {
+    when (recurrenceType.toRecurrenceType()) {
         RecurrenceType.NONE -> "不循环"
         RecurrenceType.INTERVAL_DAYS -> "每 ${intervalDays} 天"
         RecurrenceType.WEEKLY -> {

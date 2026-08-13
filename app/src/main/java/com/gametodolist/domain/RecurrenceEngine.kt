@@ -24,8 +24,7 @@ data class TimeWindow(val startMillis: Long, val endMillis: Long)
  */
 object RecurrenceEngine {
 
-    private fun typeOf(t: TaskTemplateEntity): RecurrenceType =
-        runCatching { RecurrenceType.valueOf(t.recurrenceType) }.getOrDefault(RecurrenceType.NONE)
+    private fun typeOf(t: TaskTemplateEntity): RecurrenceType = t.recurrenceType.toRecurrenceType()
 
     private fun isWeekdaySelected(date: LocalDate, mask: Int): Boolean =
         mask and (1 shl (date.dayOfWeek.value - 1)) != 0
@@ -82,7 +81,7 @@ object RecurrenceEngine {
 
     /** 计算某个循环的显示窗口 */
     fun computeWindow(cycleStart: LocalDate, t: TaskTemplateEntity, zone: ZoneId): TimeWindow {
-        val mode = runCatching { WindowMode.valueOf(t.windowMode) }.getOrDefault(WindowMode.FULL_CYCLE)
+        val mode = t.windowMode.toWindowMode()
         // 不循环：FULL_CYCLE = 长期有效；CUSTOM = 从开始日期起持续 N 天，到期作废
         if (typeOf(t) == RecurrenceType.NONE) {
             val start = cycleStart.atStartOfDay(zone)

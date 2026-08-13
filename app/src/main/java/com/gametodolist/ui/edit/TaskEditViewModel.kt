@@ -10,6 +10,8 @@ import com.gametodolist.data.TodoRepository
 import com.gametodolist.domain.RecurrenceType
 import com.gametodolist.domain.RolloverManager
 import com.gametodolist.domain.WindowMode
+import com.gametodolist.domain.toRecurrenceType
+import com.gametodolist.domain.toWindowMode
 import com.gametodolist.notify.ReminderScheduler
 import com.gametodolist.widget.WidgetUpdater
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -79,14 +81,12 @@ class TaskEditViewModel @Inject constructor(
                             title = t.title,
                             note = t.note,
                             categoryId = t.categoryId,
-                            recurrenceType = runCatching { RecurrenceType.valueOf(t.recurrenceType) }
-                                .getOrDefault(RecurrenceType.NONE),
+                            recurrenceType = t.recurrenceType.toRecurrenceType(),
                             intervalDays = t.intervalDays,
                             weekdaysMask = t.weekdaysMask,
                             monthDay = t.monthDay,
                             anchorDate = if (t.anchorDate > 0) t.anchorDate else it.anchorDate,
-                            windowMode = runCatching { WindowMode.valueOf(t.windowMode) }
-                                .getOrDefault(WindowMode.FULL_CYCLE),
+                            windowMode = t.windowMode.toWindowMode(),
                             customWindowDays = t.customWindowDays.coerceAtLeast(1),
                             reminderEnabled = t.reminderEnabled,
                             reminderMinutesBefore = t.reminderMinutesBefore

@@ -33,8 +33,7 @@ class RolloverManager @Inject constructor(
         nowMillis: Long = System.currentTimeMillis(),
         zone: ZoneId = ZoneId.systemDefault()
     ) {
-        val type = runCatching { RecurrenceType.valueOf(template.recurrenceType) }
-            .getOrDefault(RecurrenceType.NONE)
+        val type = template.recurrenceType.toRecurrenceType()
 
         if (type == RecurrenceType.NONE) {
             // 不循环：保证存在一条一次性实例；设了持续天数的到期后自动作废，不再生成新实例
@@ -80,9 +79,7 @@ class RolloverManager @Inject constructor(
     ) {
         val latest = instanceDao.getLatestForTemplate(template.id) ?: return
         if (latest.status != InstanceStatus.ACTIVE.name) return
-        if (runCatching { RecurrenceType.valueOf(template.recurrenceType) }
-                .getOrDefault(RecurrenceType.NONE) == RecurrenceType.NONE
-        ) {
+        if (template.recurrenceType.toRecurrenceType() == RecurrenceType.NONE) {
             val anchor = RecurrenceEngine.currentCycleStartDate(
                 Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate(), template, zone
             )

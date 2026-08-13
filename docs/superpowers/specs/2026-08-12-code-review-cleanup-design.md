@@ -92,10 +92,10 @@ suspend fun settleAndRefresh() {
 
 ## 6. D 类清理
 
-- 删死代码：`TaskInstanceDao.observeInRange`/`observeActive`、`TodoRepository.getActiveInstances`、`CategoryDao.getAll`/`getById`/`update`、`TaskTemplateDao.update`（被 `@Upsert` 取代）、`TaskEditUiState.loaded`。
+- 删死代码：`TaskInstanceDao.observeInRange`/`observeActive`、`TodoRepository.getActiveInstances`、`CategoryDao.getAll`/`getById`、`TaskEditUiState.loaded`。（实施修正：DAO 未用 `@Upsert` 而是 insert/update 分流，`TaskTemplateDao.update`/`CategoryDao.update` 因此被保留使用。）
 - 删依赖 `androidx.glance:glance-material3`。
 - `remainingLabel`（Formatters）与 `CalendarScreen.remainingText` 合并为单函数 `remainingLabel(startMillis, endMillis, referenceDate)`。
-- 枚举兜底收敛：`Models.kt` 加 `String.toRecurrenceType()`/`toWindowMode()`/`toInstanceStatus()` 共享扩展，替换 4 处 `runCatching { valueOf }`。
+- 枚举兜底收敛：`Models.kt` 加 `String?.toRecurrenceType()`/`toWindowMode()` 共享扩展，替换 5 处 `runCatching { valueOf }`。（实施修正：InstanceStatus 各处均为字符串比较，无 valueOf 调用，故不需要第三个扩展。）
 - 魔数颜色 `0xFF7FB69E`/`0xFFB45A5A` 收敛到 `theme/Color.kt`（启用已定义的 `ExpiredRed`）；`DarkColors` 维持现状（明确不做深色重做）。
 - 魔法数字 guard（500/400）提为命名常量。
 - `sortOrder` 字段保留 + 注释"预留未启用"（删列需重建表，成本不值）。

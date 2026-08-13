@@ -11,9 +11,14 @@ import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import com.gametodolist.GameTodoApp
 import com.gametodolist.R
+import com.gametodolist.domain.InstanceStatus
 import com.gametodolist.ui.MainActivity
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
 
-/** 闹钟触发：弹出到期提醒通知 */
+/** 闹钟触发：先校验实例仍 ACTIVE，再弹出到期提醒通知 */
 class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -21,6 +26,24 @@ class ReminderReceiver : BroadcastReceiver() {
         if (instanceId == -1L) return
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
 
+        val pendingResult = goAsync()
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            try {
+                val entryPoint = ReminderEntryPoint.get(context)
+                val instance = entryPoint.instanceDao().getById(instanceId)
+                if (instance == null || instance.status != InstanceStatus.ACTIVE.name) {
+                    // 实例已完成/作废/删除：清理残留闹钟，不弹通知
+                    entryPoint.reminderScheduler().cancel(instanceId)
+                    return@launch
+                }
+                showNotification(context, instanceId, title)
+            } finally {
+                pendingResult.finish()
+            }
+        }
+    }
+
+    private fun showNotification(context: Context, instanceId: Long, title: String) {
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED

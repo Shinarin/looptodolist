@@ -1,10 +1,11 @@
 package com.gametodolist.notify
 
-import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.os.Build
+import android.util.Log
 import com.gametodolist.data.dao.TaskInstanceDao
 import com.gametodolist.data.dao.TaskTemplateDao
 import com.gametodolist.domain.InstanceStatus
@@ -33,13 +34,25 @@ class ReminderScheduler @Inject constructor(
         )
     }
 
-    @SuppressLint("MissingPermission")
     fun schedule(instanceId: Long, title: String, triggerAtMillis: Long) {
         if (triggerAtMillis <= System.currentTimeMillis()) return
-        alarmManager.setExactAndAllowWhileIdle(
-            AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent(instanceId, title)
-        )
+        runCatching {
+            if (canScheduleExactReminders()) {
+                alarmManager.setExactAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent(instanceId, title)
+                )
+            } else {
+                // Android 14+ 未授权精确闹钟：降级非精确（可能延迟，但不崩溃）
+                alarmManager.setAndAllowWhileIdle(
+                    AlarmManager.RTC_WAKEUP, triggerAtMillis, pendingIntent(instanceId, title)
+                )
+            }
+        }.onFailure { Log.w(TAG, "schedule failed for instance $instanceId", it) }
     }
+
+    /** 是否可精确提醒（API 31 以下或已授权精确闹钟） */
+    fun canScheduleExactReminders(): Boolean =
+        Build.VERSION.SDK_INT < Build.VERSION_CODES.S || alarmManager.canScheduleExactAlarms()
 
     fun cancel(instanceId: Long) {
         alarmManager.cancel(pendingIntent(instanceId, ""))
@@ -60,5 +73,9 @@ class ReminderScheduler @Inject constructor(
     /** 全量重排（开机后 / 周期结算后调用） */
     suspend fun rescheduleAll() {
         instanceDao.getActive().forEach { scheduleForInstance(it.id) }
+    }
+
+    private companion object {
+        const val TAG = "ReminderScheduler"
     }
 }

@@ -3,6 +3,7 @@ package com.gametodolist.widget
 import com.gametodolist.data.TodoRepository
 import com.gametodolist.domain.RolloverManager
 import com.gametodolist.notify.ReminderScheduler
+import com.gametodolist.sync.DataSyncManager
 import dagger.hilt.EntryPoint
 import dagger.hilt.InstallIn
 import dagger.hilt.android.EntryPointAccessors
@@ -15,6 +16,7 @@ interface WidgetEntryPoint {
     fun repository(): TodoRepository
     fun rolloverManager(): RolloverManager
     fun reminderScheduler(): ReminderScheduler
+    fun dataSync(): DataSyncManager
 
     companion object {
         fun get(context: Context): WidgetEntryPoint =

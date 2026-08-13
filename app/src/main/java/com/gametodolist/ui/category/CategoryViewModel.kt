@@ -1,13 +1,11 @@
 package com.gametodolist.ui.category
 
-import android.content.Context
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.gametodolist.data.TodoRepository
 import com.gametodolist.data.entity.CategoryEntity
-import com.gametodolist.widget.WidgetUpdater
+import com.gametodolist.sync.DataSyncManager
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.stateIn
@@ -17,7 +15,7 @@ import javax.inject.Inject
 @HiltViewModel
 class CategoryViewModel @Inject constructor(
     private val repository: TodoRepository,
-    @ApplicationContext private val context: Context
+    private val dataSync: DataSyncManager
 ) : ViewModel() {
 
     val categories: StateFlow<List<CategoryEntity>> = repository.observeCategories()
@@ -30,14 +28,14 @@ class CategoryViewModel @Inject constructor(
     fun save(category: CategoryEntity) {
         viewModelScope.launch {
             repository.upsertCategory(category)
-            WidgetUpdater.refresh(context)
+            dataSync.settleAndRefresh()
         }
     }
 
     fun delete(category: CategoryEntity) {
         viewModelScope.launch {
             repository.deleteCategory(category)
-            WidgetUpdater.refresh(context)
+            dataSync.settleAndRefresh()
         }
     }
 }

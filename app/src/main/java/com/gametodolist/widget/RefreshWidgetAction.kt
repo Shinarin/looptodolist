@@ -13,8 +13,6 @@ class RefreshWidgetAction : ActionCallback {
         glanceId: GlanceId,
         parameters: ActionParameters
     ) {
-        val entryPoint = WidgetEntryPoint.get(context)
-        entryPoint.rolloverManager().rolloverAll()
-        TodoWidget().update(context, glanceId)
+        WidgetEntryPoint.get(context).dataSync().settleAndRefresh()
     }
 }

@@ -1,6 +1,5 @@
 package com.gametodolist.ui.edit
 
-import android.content.Context
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -12,10 +11,8 @@ import com.gametodolist.domain.RolloverManager
 import com.gametodolist.domain.WindowMode
 import com.gametodolist.domain.toRecurrenceType
 import com.gametodolist.domain.toWindowMode
-import com.gametodolist.notify.ReminderScheduler
-import com.gametodolist.widget.WidgetUpdater
+import com.gametodolist.sync.DataSyncManager
 import dagger.hilt.android.lifecycle.HiltViewModel
-import dagger.hilt.android.qualifiers.ApplicationContext
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -52,8 +49,7 @@ class TaskEditViewModel @Inject constructor(
     savedStateHandle: SavedStateHandle,
     private val repository: TodoRepository,
     private val rolloverManager: RolloverManager,
-    private val reminderScheduler: ReminderScheduler,
-    @ApplicationContext private val context: Context
+    private val dataSync: DataSyncManager
 ) : ViewModel() {
 
     private val templateId: Long = savedStateHandle.get<Long>("templateId") ?: -1L
@@ -126,14 +122,10 @@ class TaskEditViewModel @Inject constructor(
                 reminderMinutesBefore = s.reminderMinutesBefore
             )
             val newId = repository.saveTemplate(entity)
-            val saved = entity.copy(id = if (s.id == 0L) newId else s.id)
-            if (s.id == 0L) {
-                rolloverManager.rolloverTemplate(saved)
-            } else {
-                rolloverManager.regenerateActiveInstance(saved)
+            if (s.id != 0L) {
+                rolloverManager.regenerateActiveInstance(entity.copy(id = s.id))
             }
-            reminderScheduler.rescheduleAll()
-            WidgetUpdater.refresh(context)
+            dataSync.settleAndRefresh()
             _uiState.update { it.copy(saved = true) }
         }
     }

@@ -9,7 +9,7 @@ import com.gametodolist.data.entity.TaskInstanceEntity
 import com.gametodolist.data.entity.TaskTemplateEntity
 import com.gametodolist.domain.InstanceStatus
 import com.gametodolist.domain.RecurrenceEngine
-import com.gametodolist.domain.RolloverManager
+import com.gametodolist.sync.DataSyncManager
 import com.gametodolist.ui.toEpochMillis
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -38,7 +38,7 @@ data class CalendarDayItem(
 @HiltViewModel
 class CalendarViewModel @Inject constructor(
     private val repository: TodoRepository,
-    private val rolloverManager: RolloverManager
+    private val dataSync: DataSyncManager
 ) : ViewModel() {
 
     private val zone: ZoneId get() = ZoneId.systemDefault()
@@ -99,7 +99,7 @@ class CalendarViewModel @Inject constructor(
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
-        viewModelScope.launch { rolloverManager.rolloverAll() }
+        viewModelScope.launch { dataSync.settleAndRefresh() }
     }
 
     /** 模板在当月内的所有循环起点（更新日）；不循环的取开始日期 */

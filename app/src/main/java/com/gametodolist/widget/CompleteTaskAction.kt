@@ -4,7 +4,6 @@ import android.content.Context
 import androidx.glance.GlanceId
 import androidx.glance.action.ActionParameters
 import androidx.glance.appwidget.action.ActionCallback
-import androidx.glance.appwidget.updateAll
 
 /** 小组件上的「完成」动作 */
 class CompleteTaskAction : ActionCallback {
@@ -16,10 +15,8 @@ class CompleteTaskAction : ActionCallback {
     ) {
         val instanceId = parameters[INSTANCE_ID_KEY] ?: return
         val entryPoint = WidgetEntryPoint.get(context)
-        entryPoint.reminderScheduler().cancel(instanceId)
         entryPoint.repository().completeInstance(instanceId)
-        entryPoint.rolloverManager().rolloverAll()
-        TodoWidget().updateAll(context)
+        entryPoint.dataSync().settleAndRefresh()
     }
 
     companion object {

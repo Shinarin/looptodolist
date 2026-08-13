@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -27,29 +28,43 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Card
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.style.TextDecoration
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gametodolist.data.CategoryGroup
 import com.gametodolist.data.TemplateWithInstance
 import com.gametodolist.ui.components.EmptyState
+import com.gametodolist.ui.components.LabelChip
 import com.gametodolist.ui.components.TaskCard
+import com.gametodolist.ui.theme.CompletedGreen
+import com.gametodolist.ui.theme.ExpiredRed
+import com.gametodolist.ui.theme.UncategorizedGray
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -58,9 +73,19 @@ fun HomeScreen(
     viewModel: HomeViewModel = hiltViewModel()
 ) {
     val homeData by viewModel.homeData.collectAsStateWithLifecycle()
-    val collapsed = remember { mutableStateMapOf<String, Boolean>() }
+    val collapsed by viewModel.collapsed.collectAsStateWithLifecycle()
+    val snackbarHostState = remember { SnackbarHostState() }
+    var pendingDelete by remember { mutableStateOf<TemplateWithInstance?>(null) }
+    val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.consumeError()
+        }
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             // 紧凑标题栏，减少顶部留白
             Row(
@@ -83,7 +108,14 @@ fun HomeScreen(
             }
         }
     ) { padding ->
-        if (homeData.activeGroups.isEmpty() && homeData.completedGroups.isEmpty()) {
+        val data = homeData
+        if (data == null) {
+            Box(Modifier.fillMaxSize().padding(padding), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator()
+            }
+            return@Scaffold
+        }
+        if (data.activeGroups.isEmpty() && data.completedGroups.isEmpty() && data.expiredGroups.isEmpty()) {
             EmptyState(
                 text = "还没有清单，点右下角 + 创建第一条吧",
                 modifier = Modifier
@@ -101,36 +133,73 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // ---------- 未完成区 ----------
-            sectionHeader("未完成", homeData.activeGroups.sumOf { it.items.size })
-            homeData.activeGroups.forEach { group ->
+            sectionHeader("未完成", data.activeGroups.sumOf { it.items.size })
+            data.activeGroups.forEach { group ->
                 categorySection(
                     sectionKey = "active",
                     group = group,
                     collapsed = collapsed,
+                    onToggle = viewModel::toggleCollapsed,
                     completed = false,
                     onComplete = { viewModel.complete(it) },
-                    onDelete = { viewModel.delete(it) },
+                    onDelete = { pendingDelete = it },
                     onClick = { onEditTask(it.template.id) }
                 )
             }
 
             // ---------- 已完成区（为空时不显示） ----------
-            if (homeData.completedGroups.isNotEmpty()) {
+            if (data.completedGroups.isNotEmpty()) {
                 item(key = "completed_divider") { Spacer(Modifier.padding(top = 8.dp)) }
-                sectionHeader("已完成", homeData.completedGroups.sumOf { it.items.size })
-                homeData.completedGroups.forEach { group ->
+                sectionHeader("已完成", data.completedGroups.sumOf { it.items.size })
+                data.completedGroups.forEach { group ->
                     categorySection(
                         sectionKey = "completed",
                         group = group,
                         collapsed = collapsed,
+                        onToggle = viewModel::toggleCollapsed,
                         completed = true,
                         onComplete = { viewModel.uncomplete(it) },
-                        onDelete = { viewModel.delete(it) },
+                        onDelete = { pendingDelete = it },
                         onClick = { onEditTask(it.template.id) }
                     )
                 }
             }
+
+            // ---------- 已作废区（为空时不显示） ----------
+            if (data.expiredGroups.isNotEmpty()) {
+                item(key = "expired_divider") { Spacer(Modifier.padding(top = 8.dp)) }
+                sectionHeader("已作废", data.expiredGroups.sumOf { it.items.size })
+                data.expiredGroups.forEach { group ->
+                    group.items.forEach { item ->
+                        item(key = "expired_${group.category?.id ?: -1L}_${item.template.id}") {
+                            ExpiredTaskCard(
+                                item = item,
+                                color = group.color(),
+                                onRevive = { viewModel.revive(item) }
+                            )
+                        }
+                    }
+                }
+            }
         }
+    }
+
+    // 删除确认弹窗：左滑只弹确认，确认后才真正删除
+    pendingDelete?.let { item ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除清单？") },
+            text = { Text("「${item.template.title}」及其历史记录、提醒将一并删除，无法恢复。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.delete(item)
+                    pendingDelete = null
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
+            }
+        )
     }
 }
 
@@ -148,21 +217,18 @@ private fun LazyListScope.sectionHeader(title: String, count: Int) {
 private fun LazyListScope.categorySection(
     sectionKey: String,
     group: CategoryGroup,
-    collapsed: MutableMap<String, Boolean>,
+    collapsed: Set<String>,
+    onToggle: (String) -> Unit,
     completed: Boolean,
     onComplete: (TemplateWithInstance) -> Unit,
     onDelete: (TemplateWithInstance) -> Unit,
     onClick: (TemplateWithInstance) -> Unit
 ) {
     val key = "$sectionKey:${group.category?.id ?: -1L}"
-    val isCollapsed = collapsed[key] == true
+    val isCollapsed = key in collapsed
 
     item(key = "header_$key") {
-        CategoryHeader(
-            group = group,
-            collapsed = isCollapsed,
-            onToggle = { collapsed[key] = !isCollapsed }
-        )
+        CategoryHeader(group = group, collapsed = isCollapsed, onToggle = { onToggle(key) })
     }
 
     item(key = "items_$key") {
@@ -178,7 +244,7 @@ private fun LazyListScope.categorySection(
                         color = group.color(),
                         completed = completed,
                         onComplete = { onComplete(item) },
-                        onDelete = { onDelete(item) },
+                        onRequestDelete = { onDelete(item) },
                         onClick = { onClick(item) }
                     )
                 }
@@ -188,7 +254,7 @@ private fun LazyListScope.categorySection(
 }
 
 private fun CategoryGroup.color(): Color =
-    category?.color?.let { Color(it) } ?: Color(0xFF9E9E9E)
+    category?.color?.let { Color(it) } ?: UncategorizedGray
 
 @Composable
 private fun CategoryHeader(
@@ -235,7 +301,7 @@ private fun SwipeableTaskCard(
     color: Color,
     completed: Boolean,
     onComplete: () -> Unit,
-    onDelete: () -> Unit,
+    onRequestDelete: () -> Unit,
     onClick: () -> Unit
 ) {
     val dismissState = rememberSwipeToDismissBoxState(
@@ -246,7 +312,8 @@ private fun SwipeableTaskCard(
                     if (!completed) onComplete()
                     false
                 }
-                SwipeToDismissBoxValue.EndToStart -> { onDelete(); true }
+                // 左滑删除：只通知外部弹确认窗，不直接 dismiss
+                SwipeToDismissBoxValue.EndToStart -> { onRequestDelete(); false }
                 SwipeToDismissBoxValue.Settled -> false
             }
         }
@@ -257,8 +324,8 @@ private fun SwipeableTaskCard(
         enableDismissFromStartToEnd = !completed,
         backgroundContent = {
             val (bg, label) = when (dismissState.targetValue) {
-                SwipeToDismissBoxValue.StartToEnd -> Color(0xFF7FB69E) to "完成"
-                SwipeToDismissBoxValue.EndToStart -> Color(0xFFB45A5A) to "删除"
+                SwipeToDismissBoxValue.StartToEnd -> CompletedGreen to "完成"
+                SwipeToDismissBoxValue.EndToStart -> ExpiredRed to "删除"
                 SwipeToDismissBoxValue.Settled -> Color.Transparent to ""
             }
             Box(
@@ -280,5 +347,42 @@ private fun SwipeableTaskCard(
             onClick = onClick,
             completed = completed
         )
+    }
+}
+
+
+@Composable
+private fun ExpiredTaskCard(
+    item: TemplateWithInstance,
+    color: Color,
+    onRevive: () -> Unit
+) {
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(4.dp)
+                    .height(40.dp)
+                    .background(color.copy(alpha = 0.45f), MaterialTheme.shapes.small)
+            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    item.template.title,
+                    style = MaterialTheme.typography.titleMedium.copy(
+                        textDecoration = TextDecoration.LineThrough
+                    ),
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(3.dp))
+                LabelChip("已截止作废", MaterialTheme.colorScheme.error)
+            }
+            TextButton(onClick = onRevive) { Text("重新开启") }
+        }
     }
 }

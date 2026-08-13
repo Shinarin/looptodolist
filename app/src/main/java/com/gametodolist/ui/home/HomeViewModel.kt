@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -21,8 +22,24 @@ class HomeViewModel @Inject constructor(
     private val dataSync: DataSyncManager
 ) : ViewModel() {
 
-    val homeData: StateFlow<HomeData> = repository.observeHomeData()
-        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), HomeData(emptyList(), emptyList()))
+    val homeData: StateFlow<HomeData?> = repository.observeHomeData()
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)
+
+    /** 分类分区折叠状态（key = "active:分类id" 等形式），提升到 VM 避免切 tab 丢失 */
+    private val _collapsed = MutableStateFlow<Set<String>>(emptySet())
+    val collapsed: StateFlow<Set<String>> = _collapsed.asStateFlow()
+
+    fun toggleCollapsed(key: String) {
+        _collapsed.update { if (key in it) it - key else it + key }
+    }
+
+    /** 「重新开启」已作废的一次性任务 */
+    fun revive(item: TemplateWithInstance) {
+        launchWrite {
+            repository.reviveTemplate(item.template.id)
+            dataSync.settleAndRefresh()
+        }
+    }
 
     private val _errorMessage = MutableStateFlow<String?>(null)
     val errorMessage: StateFlow<String?> = _errorMessage.asStateFlow()

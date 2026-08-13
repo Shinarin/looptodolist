@@ -23,3 +23,5 @@ val AppOnSurfaceVariant = Color(0xFF5A6B61)
 val AppOutline = Color(0xFFC4D0C7)
 
 val ExpiredRed = Color(0xFFB45A5A)
+val CompletedGreen = Color(0xFF7FB69E)   // 完成态/左滑完成背景
+val UncategorizedGray = Color(0xFF9E9E9E) // 未分类默认色

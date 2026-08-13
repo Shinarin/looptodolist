@@ -78,14 +78,22 @@ fun TaskCard(
                     tint = categoryColor,
                     modifier = Modifier
                         .size(24.dp)
-                        .clickable(onClick = onComplete)
+                        .clickable(
+                            onClickLabel = "撤销完成",
+                            role = androidx.compose.ui.semantics.Role.Checkbox,
+                            onClick = onComplete
+                        )
                 )
             } else {
                 Box(
                     modifier = Modifier
                         .size(24.dp)
                         .border(2.dp, categoryColor, CircleShape)
-                        .clickable(onClick = onComplete)
+                        .clickable(
+                            onClickLabel = "完成",
+                            role = androidx.compose.ui.semantics.Role.Checkbox,
+                            onClick = onComplete
+                        )
                 )
             }
             Spacer(Modifier.width(12.dp))

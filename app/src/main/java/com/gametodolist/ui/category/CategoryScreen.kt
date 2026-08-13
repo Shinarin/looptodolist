@@ -32,10 +32,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -59,8 +62,18 @@ fun CategoryScreen(
     val categories by viewModel.categories.collectAsStateWithLifecycle()
     var editing by remember { mutableStateOf<CategoryEntity?>(null) }
     var showDialog by remember { mutableStateOf(false) }
+    val snackbarHostState = remember { SnackbarHostState() }
+    val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
+    var pendingDelete by remember { mutableStateOf<CategoryEntity?>(null) }
+    LaunchedEffect(errorMessage) {
+        errorMessage?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.consumeError()
+        }
+    }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             TopAppBar(
                 title = { Text("分类管理") },
@@ -92,7 +105,7 @@ fun CategoryScreen(
                         editing = category
                         showDialog = true
                     },
-                    onDelete = { viewModel.delete(category) }
+                    onDelete = { pendingDelete = category }
                 )
             }
         }
@@ -105,6 +118,23 @@ fun CategoryScreen(
             onSave = {
                 viewModel.save(it)
                 showDialog = false
+            }
+        )
+    }
+
+    pendingDelete?.let { category ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("删除分类？") },
+            text = { Text("「${category.name}」将被删除，其中的清单归入未分类。") },
+            confirmButton = {
+                TextButton(onClick = {
+                    viewModel.delete(category)
+                    pendingDelete = null
+                }) { Text("删除", color = MaterialTheme.colorScheme.error) }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("取消") }
             }
         )
     }

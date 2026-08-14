@@ -14,20 +14,64 @@ export JAVA_HOME="C:/Program Files/Android/Android Studio/jbr"   # 系统无独�
 - 模拟器验证：`emulator -avd Pixel_6`（emulator/adb 在 `C:/Users/da270/AppData/Local/Android/Sdk/` 下）；截图 `adb exec-out screencap -p > /tmp/x.png`，用 ReadMediaFile 读 `C:\Users\da270\AppData\Local\Temp\x.png`。
 - Git Bash 陷阱：adb shell 里的 `/sdcard/...` 等绝对路径会被 MSYS 转成 Windows 路径，必须 `MSYS_NO_PATHCONV=1` 前缀；UI 坐标用 `adb shell uiautomator dump` + pull 取精确 bounds，勿靠截图估算（截图是 900x2000 下采样，真实 1080x2400）。
 - 读应用私有数据：`adb shell run-as com.gametodolist cat /data/data/com.gametodolist/shared_prefs/widget_prefs.xml`（debug 包可用）。
+- 荣耀/华为真机：logcat 被系统禁用（抓不到应用日志），临时诊断改为写应用私有文件再 `run-as cat`；`adb push` 的远端路径也要 `MSYS_NO_PATHCONV=1`。
 
 ## 架构地图
 
 - **领域层** `domain/`：`RecurrenceEngine`（纯函数：循环起点/显示窗口计算，NONE/INTERVAL_DAYS/WEEKLY/MONTHLY；WEEKLY/MONTHLY 支持 anchorDate——首个循环不早于 anchor，`anchorDate<=0` 保持旧行为）、`RolloverManager`（结算：到期作废+生成新循环；NONE 有持续天数时到期作废不续期，且创建/编辑即过期立即作废；编辑模板走 `regenerateActiveInstance` 修正当前实例——起点失效则作废/改挂再结算；`reviveTemplate` 复活已作废一次性任务；四个 public 入口共用一把 Mutex）、`WallpaperCrop`（cover 裁剪窗口纯函数）、`Models`（枚举 + `toRecurrenceType()`/`toWindowMode()` 兜底扩展）。
 - **数据层** `data/`：Room 三表 categories/task_templates/task_instances；模板存规则，实例存某次循环的窗口与状态（ACTIVE/COMPLETED/EXPIRED）。DB v3（v2→v3 去重并加实例表 `(templateId, cycleStart)` 唯一索引；exportSchema 开，schema 在 `app/schemas/`）。模板/分类保存走 insert/update 分流（**不要用 REPLACE 插入模板**——会触发实例表 FK CASCADE 清空历史）。主页数据 = 每模板最新实例分未完成/已完成/已作废三区再按分类分组（`TodoRepository.observeHomeData`）。
 - **统一管线** `sync/DataSyncManager`：任何任务/模板/分类写操作后调 `settleAndRefresh()`——结算（rolloverAll）→ 全量重排提醒（只排 ACTIVE，刚完成/删除的自动跳过）→ 刷新所有桌面组件。三步全量幂等、单步失败互不影响。
-- **UI** `ui/`：底部三栏（清单/日历/设置，`AppNav`，NavHost fade 150ms）。主页紧凑标题栏+三分区（未完成/已完成划线/已作废可重新开启）+加载态；左滑删除弹确认；分类折叠状态在 ViewModel。日历页用引擎对任意日期（含未来）计算当天任务，打点=循环更新日，有"回到今天"。编辑页开始日期（不循环/每N天直接设；每周/每月经"指定开始日期"开关）、显示时段（整循环/长期有效 vs 自定义 N 天，≥1）；脏状态返回弹放弃确认；编辑模式有删除入口。删除任务/分类均有确认弹窗。
+- **UI** `ui/`：底部三栏（清单/日历/设置，`AppNav`，NavHost fade 150ms）。所有页面用紧凑标题栏（statusBarsPadding + 小 padding，**不用原生 TopAppBar**——它比紧凑栏矮一截留白多）。主页紧凑标题栏+三分区（未完成/已完成划线/已作废可重新开启）+加载态；左滑删除弹确认；分类折叠状态在 ViewModel。日历页用引擎对任意日期（含未来）计算当天任务，打点=循环更新日，有"回到今天"。编辑页开始日期（不循环/每N天直接设；每周/每月经"指定开始日期"开关）、显示时段（整循环/长期有效 vs 自定义 N 天，≥1）；脏状态返回弹放弃确认；编辑模式有删除入口。删除任务/分类均有确认弹窗。
 - **小组件** `widget/`：Glance `TodoWidget`（SizeMode.Exact）。要点：
-  - `provideGlance` 只做轻量读取（不跑 rollover），壁纸位图有文件级缓存（解码在 IO 线程） → 刷新快。
+  - **刷新模型（Glance 1.1.1 的坑，已踩过）**：`update()` 只在 Glance Preferences 内容变化时才触发重组，且 `provideGlance` 每个会话只执行一次（`provideContent` 设计上不返回）——Room 数据变化本身驱动不了重组，会话存活期（约几十秒）内直接调 update 会被静默忽略，表现为"点了没反应"。所以统一走 `WidgetUpdater.refresh(context)`：先 bump `KEY_DATA_VERSION` 再 update；组合内用 `produceState(key1 = dataVersion)` 重读数据库/壁纸，SharedPreferences 外观值重组时直接读。不要在 provideGlance 里一次性读数据就完事。
+  - 结算不放进组件链路（在 App/Worker/动作里做），壁纸位图有文件级缓存（解码在 IO 线程） → 刷新快。
   - 交互状态（已完成区展开）存 Glance Preferences 原子状态（`KEY_SHOW_COMPLETED`），**不要**用 SharedPreferences 存高频交互态（读写竞态会导致点击“无效”）。
   - LazyColumn 的 itemId 必须与任务实例 id 段隔开（组卡片 100_000+/200_000+，头部 Long.MAX_VALUE-1），否则视图复用导致点击错乱。
   - 外观：纯色（透明度）/壁纸（亮度+按 appWidgetId 裁剪矩形），磨砂已废弃（RemoteViews 无法真模糊）。外观存 `WidgetPrefs`（SharedPreferences），改动后调 `WidgetUpdater.refresh`。组件删除后 `onDeleted` 清理裁剪残留键。
-  - 裁剪页 `WidgetCropActivity`：组件头部裁剪按钮 + 长按菜单（provider xml 里 configure + `reconfigurable|configuration_optional`，31+ 生效）进入；选框=组件当前宽高比，可拖动/双指缩放。API 26-30 添加组件会被系统强制拉进 configure，**所有退出路径（无壁纸/取消/返回）都必须 RESULT_OK 携带组件 id 放行添加**（CANCELED 会导致组件加不上）。
+  - 裁剪页 `WidgetCropActivity`：独立 `taskAffinity=""`+`excludeFromRecents`（从组件进入时返回键直接回桌面，不进 App 主栈）；组件头部裁剪按钮 + 长按菜单（provider xml 里 configure + `reconfigurable|configuration_optional`，31+ 生效）进入；选框可拖动/双指缩放。**选框比例只信系统上报的精确尺寸**（`OPTION_APPWIDGET_SIZES` 首个；<31 用 min/max 中值）——荣耀等 Launcher 不上报真实尺寸（SIZES 为空、min/max 是粗范围，Glance 的 LocalSize 是 maxW/minH 拼出来的假值，intent 带的 aspect 同样不可信），此时改自由框选（底部有 全图/1:1/4:3/3:4/16:9/9:16 预设，芯片内带比例形状示意；组件端 ContentScale.Crop 铺满显示，所选即所得）。再次进入时从已存裁剪区域还原比例（匹配预设，≈全图归全图，都不匹配则用原比例）+大小+位置，选框与上次保存完全一致。**更换壁纸会清空所有已存裁剪区域**（区域是相对旧图的相对值，对新图无意义），裁剪页从全图重新开始。保存后走 `WidgetUpdater.refresh`（直接 updateAll 可能被 Glance 静默忽略）。API 26-30 添加组件会被系统强制拉进 configure，**所有退出路径（无壁纸/取消/返回）都必须 RESULT_OK 携带组件 id 放行添加**（CANCELED 会导致组件加不上）。
 - **提醒** `notify/`：ReminderScheduler（精确闹钟；Android 14+ 未授权自动降级非精确，不崩溃）、ReminderReceiver（触发前查库校验实例仍 ACTIVE，否则自清残留闹钟不弹）、RolloverWorker（周期结算走 DataSyncManager）、BootReceiver。
+
+## 目录结构（各部分作用）
+
+```
+app/src/main/java/com/gametodolist/
+├── GameTodoApp.kt          # @HiltAndroidApp：通知渠道、周期结算 Worker、首启默认分类、WorkManager 配置
+├── di/AppModule.kt         # Hilt：Room 数据库（注册迁移）与三个 DAO
+├── domain/                 # 纯 Kotlin 业务规则（无 Android 依赖，JVM 单测）
+│   ├── RecurrenceEngine.kt # 循环起点/显示窗口计算
+│   ├── RolloverManager.kt  # 结算：到期作废+补新循环；regenerate/revive；Mutex 串行
+│   ├── WallpaperCrop.kt    # cover 裁剪窗口纯函数
+│   └── Models.kt           # 枚举、字符串兜底解析、分类色板
+├── data/
+│   ├── AppDatabase.kt      # Room v3（exportSchema 开，快照在 app/schemas/）
+│   ├── Migrations.kt       # v1→v2 anchorDate；v2→v3 实例表唯一索引
+│   ├── entity/             # Category / TaskTemplate(规则) / TaskInstance(单次循环状态)
+│   ├── dao/                # 三表 DAO
+│   └── TodoRepository.kt   # 存取 + 主页数据组合（三分区再按分类分组）
+├── sync/DataSyncManager.kt # 统一写后管线：结算→重排提醒→刷新组件
+├── notify/                 # 提醒调度与接收、周期结算 Worker、开机接收器
+├── widget/                 # Glance 桌面小组件
+│   ├── TodoWidget.kt       # 组件布局与数据装配（produceState 按 KEY_DATA_VERSION 重读）
+│   ├── WidgetUpdater.kt    # 唯一刷新入口：bump 数据版本号 + update
+│   ├── TodoWidgetReceiver.kt        # onUpdate 走统一刷新；onDeleted 清裁剪残留键
+│   ├── Complete/UncompleteTaskAction.kt      # 行点击完成/取消
+│   ├── ToggleShowCompletedAction.kt          # 已完成区展开/收起
+│   ├── RefreshWidgetAction.kt                # 手动刷新按钮
+│   ├── WidgetPrefs.kt      # 外观与裁剪区域存储（SharedPreferences）
+│   ├── WidgetCropActivity.kt # 壁纸裁剪页（独立任务栈；比例预设/自由框选）
+│   └── WidgetEntryPoint.kt # Hilt EntryPoint（组件/动作取依赖）
+└── ui/
+    ├── MainActivity.kt     # 唯一主 Activity（edge-to-edge、通知权限请求）
+    ├── AppNav.kt           # NavHost：清单/日历/设置三栏 + 分类/编辑二级页
+    ├── Formatters.kt       # 日期/循环规则/剩余时间文案（UI 与组件共用）
+    ├── theme/              # M3 主题与配色
+    ├── home/               # 主页：未完成/已完成/已作废三分区 + 分类分组
+    ├── calendar/           # 日历：引擎预演任意日期任务，更新日打点
+    ├── edit/               # 新增/编辑清单（脏检查、删除入口）
+    ├── category/           # 分类管理（增删改、色板）
+    ├── settings/           # 外观/壁纸/精确闹钟授权；预览为 60% 宽 1:1 居中裁剪
+    └── components/         # TaskCard、EmptyState、LabelChip 等共用组件
+```
 
 ## 约定
 

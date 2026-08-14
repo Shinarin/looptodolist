@@ -57,7 +57,6 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.gametodolist.domain.WallpaperCrop
 import com.gametodolist.widget.WidgetPrefs
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -250,15 +249,15 @@ private fun WallpaperSection(
     }
 }
 
-/** 壁纸 + 亮度遮罩 + 示例文字的概览；有裁剪区域时按组件同款区域显示 */
+/** 壁纸 + 亮度遮罩 + 示例文字的概览；有裁剪区域时按组件同款区域显示。
+ *  预览为页面宽 60% 的居中方形，图片居中最大裁剪（1:1），不拉伸变形 */
 @Composable
 private fun WallpaperPreview(bitmap: Bitmap, dim: Float, cropRect: List<Float>?) {
     val onDark = dim >= 0.25f
     val textPrimary = if (onDark) Color(0xFFF5F7F5) else Color(0xFF1A2420)
     val textSecondary = if (onDark) Color(0xCCF5F7F5) else Color(0xFF5A6B61)
 
-    // 与小组件一致的裁剪：自定义区域优先，否则按预览框比例居中裁剪
-    val previewAspect = 2.4f
+    // 与小组件一致的裁剪：自定义区域优先，否则用原图
     val cropped by produceState<ImageBitmap?>(null, bitmap, cropRect) {
         value = withContext(Dispatchers.Default) {
             runCatching {
@@ -273,39 +272,40 @@ private fun WallpaperPreview(bitmap: Bitmap, dim: Float, cropRect: List<Float>?)
                             .coerceIn(1, bitmap.height - (cropRect[1] * bitmap.height).toInt())
                     ).asImageBitmap()
                 } else {
-                    val r = WallpaperCrop.cropRect(bitmap.width, bitmap.height, previewAspect, 0.5f, 0.5f)
-                    Bitmap.createBitmap(bitmap, r[0], r[1], r[2], r[3]).asImageBitmap()
+                    bitmap.asImageBitmap()
                 }
             }.getOrNull()
         }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .aspectRatio(previewAspect)
-            .clip(RoundedCornerShape(12.dp))
-    ) {
-        cropped?.let { preview ->
-            Image(
-                bitmap = preview,
-                contentDescription = "壁纸亮度预览",
-                contentScale = ContentScale.FillBounds,
-                modifier = Modifier.fillMaxSize()
-            )
-        }
-        Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)))
-        Column(modifier = Modifier.padding(12.dp)) {
-            Text(
-                "晨跑 5 公里",
-                style = MaterialTheme.typography.bodyMedium,
-                color = textPrimary
-            )
-            Text(
-                "背单词 20 个",
-                style = MaterialTheme.typography.bodyMedium.copy(textDecoration = TextDecoration.LineThrough),
-                color = textSecondary
-            )
+    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth(0.6f)
+                .aspectRatio(1f)
+                .clip(RoundedCornerShape(12.dp))
+        ) {
+            cropped?.let { preview ->
+                Image(
+                    bitmap = preview,
+                    contentDescription = "壁纸亮度预览",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+            Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = dim)))
+            Column(modifier = Modifier.padding(12.dp)) {
+                Text(
+                    "晨跑 5 公里",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = textPrimary
+                )
+                Text(
+                    "背单词 20 个",
+                    style = MaterialTheme.typography.bodyMedium.copy(textDecoration = TextDecoration.LineThrough),
+                    color = textSecondary
+                )
+            }
         }
     }
 }

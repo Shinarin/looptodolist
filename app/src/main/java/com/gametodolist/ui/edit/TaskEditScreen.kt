@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.rememberScrollState
@@ -41,7 +42,6 @@ import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.rememberDatePickerState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -97,22 +97,28 @@ fun TaskEditScreen(
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
-            TopAppBar(
-                title = { Text(if (state.id == 0L) "新增清单" else "编辑清单") },
-                navigationIcon = {
-                    IconButton(onClick = { requestBack() }) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
-                    }
-                },
-                actions = {
-                    if (state.id != 0L) {
-                        IconButton(onClick = { showDeleteDialog = true }) {
-                            Icon(Icons.Default.Delete, contentDescription = "删除",
-                                tint = MaterialTheme.colorScheme.error)
-                        }
+            // 紧凑标题栏（与主页一致，减少顶部留白）
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .statusBarsPadding(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                IconButton(onClick = { requestBack() }) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "返回")
+                }
+                Text(
+                    if (state.id == 0L) "新增清单" else "编辑清单",
+                    style = MaterialTheme.typography.titleLarge,
+                    modifier = Modifier.weight(1f)
+                )
+                if (state.id != 0L) {
+                    IconButton(onClick = { showDeleteDialog = true }) {
+                        Icon(Icons.Default.Delete, contentDescription = "删除",
+                            tint = MaterialTheme.colorScheme.error)
                     }
                 }
-            )
+            }
         }
     ) { padding ->
         Column(

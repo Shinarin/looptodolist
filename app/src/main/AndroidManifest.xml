@@ -38,9 +38,12 @@
         </receiver>
 
         <!-- 小组件壁纸裁剪（组件裁剪按钮 / 长按菜单的设置入口） -->
+        <!-- 独立 taskAffinity：从组件进入时不开进 App 主任务栈，返回键直接回桌面 -->
         <activity
             android:name=".widget.WidgetCropActivity"
-            android:exported="true" />
+            android:exported="true"
+            android:taskAffinity=""
+            android:excludeFromRecents="true" />
 
         <!-- 到期提醒 -->
         <receiver

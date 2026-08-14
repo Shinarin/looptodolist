@@ -5,6 +5,8 @@ import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -59,6 +61,14 @@ import kotlinx.coroutines.withContext
 val KEY_SHOW_COMPLETED = androidx.datastore.preferences.core.booleanPreferencesKey("show_completed")
 
 /**
+ * 数据版本号（Glance Preferences 里的键，WidgetUpdater 每次刷新时递增）。
+ * Glance 1.1.1 的 update() 只在 Glance 状态变化时才触发重组，且 provideGlance 每个会话只跑一次，
+ * 数据层（Room）的变化本身无法让组件刷新（存活会话内会被静默忽略）。
+ * 因此每次数据刷新先 bump 本键，重组时 produceState 以它为 key 重新读库。
+ */
+val KEY_DATA_VERSION = androidx.datastore.preferences.core.longPreferencesKey("data_version")
+
+/**
  * 桌面小组件：可拖拽调整大小。
  * 背景支持纯色（调透明度）/ 壁纸（调亮度、点头部裁剪按钮框选显示区域），在 App 设置页修改。
  * 列表可上下滑动；按分类分组显示组名；点击任务行即完成/取消完成，与 App 内状态实时一致；
@@ -75,28 +85,43 @@ class TodoWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         // 注意：这里只做轻量读取，结算在 App/Worker/刷新按钮里做，保证刷新速度
         val entryPoint = WidgetEntryPoint.get(context)
-        val homeData = entryPoint.repository().observeHomeData().first()
+        // 首帧数据（新会话的首帧即为最新；会话内的后续刷新由 KEY_DATA_VERSION 驱动重组重读）
+        val initialHomeData = entryPoint.repository().observeHomeData().first()
 
         val appWidgetId = runCatching {
             GlanceAppWidgetManager(context).getAppWidgetId(id)
         }.getOrDefault(AppWidgetManager.INVALID_APPWIDGET_ID)
 
-        // 外观设置
-        val bgMode = WidgetPrefs.bgMode(context)
-        val solidAlpha = WidgetPrefs.solidAlpha(context)
-        val wallpaperDim = WidgetPrefs.wallpaperDim(context)
-        val wallpaper: Bitmap? = if (bgMode == WidgetPrefs.BG_WALLPAPER) {
+        val initialWallpaper: Bitmap? = if (WidgetPrefs.bgMode(context) == WidgetPrefs.BG_WALLPAPER) {
             withContext(Dispatchers.IO) { WallpaperCache.get(context) }
-        } else null
-        val cropRect = if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
-            WidgetPrefs.cropRect(context, appWidgetId)
         } else null
 
         provideContent {
             val size = LocalSize.current
             val compact = size.height < 160.dp
             val aspect = if (size.height.value > 0) size.width.value / size.height.value else 1f
-            val showCompleted = currentState<Preferences>()[KEY_SHOW_COMPLETED] ?: false
+            val prefs = currentState<Preferences>()
+            val showCompleted = prefs[KEY_SHOW_COMPLETED] ?: false
+            val dataVersion = prefs[KEY_DATA_VERSION] ?: 0L
+
+            // 数据版本变化（=外部数据刷新）时重读数据库与壁纸
+            val homeData by produceState(initialHomeData, key1 = dataVersion) {
+                value = entryPoint.repository().observeHomeData().first()
+            }
+            val wallpaper by produceState<Bitmap?>(initialWallpaper, key1 = dataVersion) {
+                value = if (WidgetPrefs.bgMode(context) == WidgetPrefs.BG_WALLPAPER) {
+                    withContext(Dispatchers.IO) { WallpaperCache.get(context) }
+                } else null
+            }
+
+            // 外观设置：SharedPreferences 读取便宜，重组时直接取最新值
+            val bgMode = WidgetPrefs.bgMode(context)
+            val solidAlpha = WidgetPrefs.solidAlpha(context)
+            val wallpaperDim = WidgetPrefs.wallpaperDim(context)
+            val cropRect = if (appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
+                WidgetPrefs.cropRect(context, appWidgetId)
+            } else null
+
             // 壁纸：优先该实例自定义的裁剪区域，否则按当前宽高比居中裁剪
             val croppedWallpaper = wallpaper?.let { src ->
                 runCatching {

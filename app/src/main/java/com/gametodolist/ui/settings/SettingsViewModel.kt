@@ -120,6 +120,8 @@ class SettingsViewModel @Inject constructor(
                 _uiState.update { it.copy(wallpaperError = true) }
                 return@launch
             }
+            // 新壁纸的尺寸/比例不同，旧的框选区域不再适用，全部清空（裁剪页从全图重新开始）
+            WidgetPrefs.clearAllCropRects(context)
             // 有壁纸后自动切到壁纸模式
             WidgetPrefs.prefs(context).edit()
                 .putInt(WidgetPrefs.KEY_BG_MODE, WidgetPrefs.BG_WALLPAPER).apply()

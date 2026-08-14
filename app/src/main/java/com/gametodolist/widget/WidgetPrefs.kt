@@ -63,6 +63,13 @@ object WidgetPrefs {
             .apply()
     }
 
+    /** 更换壁纸后清空所有裁剪区域（区域是相对旧图的相对值，对新图无意义） */
+    fun clearAllCropRects(context: Context) {
+        val editor = prefs(context).edit()
+        prefs(context).all.keys.filter { it.startsWith(KEY_CROP_PREFIX) }.forEach { editor.remove(it) }
+        editor.apply()
+    }
+
     /** 任一组件实例的裁剪区域（设置页预览与组件保持一致用） */
     fun anyCropRect(context: Context): FloatArray? {
         val key = prefs(context).all.keys

@@ -11,6 +11,7 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.detectTransformGestures
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -24,7 +25,10 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.Button
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -46,7 +50,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.glance.appwidget.updateAll
 import androidx.lifecycle.lifecycleScope
 import com.gametodolist.ui.theme.GameTodoTheme
 import kotlinx.coroutines.Dispatchers
@@ -58,6 +61,10 @@ import kotlin.math.min
  * 小组件壁纸裁剪页：以组件当前宽高比在图片上框选显示区域。
  * 进入方式：组件头部的裁剪按钮，或长按组件 → 设置（configure）。
  * 选框可拖动、双指缩放；保存后只影响对应组件实例。
+ *
+ * 比例来源：桌面上报的精确尺寸（OPTION_APPWIDGET_SIZES，Pixel 等支持）；
+ * 部分 Launcher（如荣耀 MagicOS）不上报真实尺寸（SIZES 为空、min/max 为粗范围），
+ * 此时改为自由框选——组件端以 ContentScale.Crop 把所选区域铺满显示，所选即所得。
  */
 class WidgetCropActivity : ComponentActivity() {
 
@@ -66,9 +73,11 @@ class WidgetCropActivity : ComponentActivity() {
         val appWidgetId = intent.getIntExtra(
             AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID
         )
-        val aspect = intent.getFloatExtra(EXTRA_ASPECT, -1f).takeIf { it > 0f }
-            ?: widgetAspectFromSystem(appWidgetId)
-            ?: 1.4f
+        // null = 桌面未上报组件尺寸，自由框选。
+        // intent 里的 aspect 来自组合时的 LocalSize，仅在桌面上报精确尺寸（SIZES 非空）时才可信
+        // （荣耀等 Launcher 的 SIZES 为空，LocalSize 是用 min/max 乱拼的，不能用）
+        val extra = intent.getFloatExtra(EXTRA_ASPECT, -1f).takeIf { it > 0f && hasExactSizes }
+        val aspect = extra ?: widgetAspectFromSystem(appWidgetId)
 
         // configure 流程（API 26-30 添加组件时系统强制经过本页）：取消/返回/无壁纸都放行添加
         // （RESULT_CANCELED 会让组件加不上桌面），壁纸用默认居中裁剪，之后可随时再裁剪
@@ -89,17 +98,39 @@ class WidgetCropActivity : ComponentActivity() {
         }
     }
 
-    /** 长按菜单进入时没有 aspect 参数，尝试从系统读组件实际尺寸 */
+    /** 桌面上报的 SIZES 是否可用（荣耀等 Launcher 返回空列表，此时 LocalSize 传来的比例也不可信） */
+    private val hasExactSizes: Boolean
+        get() = !exactSizes().isNullOrEmpty()
+
+    private fun exactSizes(): List<android.util.SizeF>? {
+        if (Build.VERSION.SDK_INT < 31) return null
+        val id = intent.getIntExtra(
+            AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID
+        )
+        if (id == AppWidgetManager.INVALID_APPWIDGET_ID) return null
+        return runCatching {
+            AppWidgetManager.getInstance(this).getAppWidgetOptions(id)
+                .getParcelableArrayList<android.util.SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
+        }.getOrNull()
+    }
+
+    /**
+     * 从系统读组件当前宽高比：API 31+ 取 SIZES 首个（当前尺寸）；
+     * 更低版本用 min/max 中值（老 Launcher 一般 min==max）；读不到返回 null。
+     */
     private fun widgetAspectFromSystem(appWidgetId: Int): Float? {
         if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) return null
         return runCatching {
             if (Build.VERSION.SDK_INT >= 31) {
-                val sizes = AppWidgetManager.getInstance(this)
-                    .getAppWidgetOptions(appWidgetId)
-                    .getParcelableArrayList<android.util.SizeF>(AppWidgetManager.OPTION_APPWIDGET_SIZES)
-                sizes?.minByOrNull { kotlin.math.abs(it.width / it.height - 1.4f) }
-                    ?.let { it.width / it.height }
-            } else null
+                exactSizes()?.firstOrNull()?.let { it.width / it.height }
+            } else {
+                val opts = AppWidgetManager.getInstance(this).getAppWidgetOptions(appWidgetId)
+                val w = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0) +
+                    opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0)
+                val h = opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) +
+                    opts.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0)
+                if (w > 0 && h > 0) w.toFloat() / h else null
+            }
         }.getOrNull()
     }
 
@@ -108,10 +139,38 @@ class WidgetCropActivity : ComponentActivity() {
     }
 }
 
+/** 自由框选的比例预设（value 为 w/h，null = 全图） */
+private val RATIO_PRESETS: List<Pair<String, Float?>> = listOf(
+    "全图" to null,
+    "1:1" to 1f,
+    "4:3" to 4f / 3f,
+    "3:4" to 3f / 4f,
+    "16:9" to 16f / 9f,
+    "9:16" to 9f / 16f
+)
+
+/** 进入裁剪页时从已保存区域还原的初始状态（preset 为 null 表示全图/锁定模式忽略） */
+private data class InitialCrop(val preset: Float?, val scale: Float, val cx: Float, val cy: Float)
+
+/** 比例预设的形状示意：按真实宽高比画的描边小矩形 */
+@Composable
+private fun RatioShapeGlyph(ratio: Float) {
+    val color = LocalContentColor.current
+    val w = if (ratio >= 1f) 16.dp else 16.dp * ratio
+    val h = if (ratio >= 1f) 16.dp / ratio else 16.dp
+    Box(
+        Modifier
+            .width(w)
+            .height(h)
+            .border(1.dp, color)
+            .background(color.copy(alpha = 0.15f))
+    )
+}
+
 @Composable
 private fun CropScreen(
     appWidgetId: Int,
-    aspect: Float,
+    aspect: Float?,
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
@@ -166,7 +225,7 @@ private fun CropScreen(
 @Composable
 private fun CropArea(
     bitmap: Bitmap,
-    aspect: Float,
+    aspect: Float?,
     appWidgetId: Int,
     onClose: () -> Unit
 ) {
@@ -184,31 +243,59 @@ private fun CropArea(
         val originX = (frameW - dispW) / 2f
         val originY = (frameH - dispH) / 2f
 
-        // 基准选框：与组件同宽高比、恰好内切图片的最大矩形
+        // 选框比例：锁定时为组件宽高比；自由框选（aspect=null）时由底部预设选择，null=全图
+        // 初始恢复：从已保存的裁剪区域还原比例（含非预设的自定义比例）、大小与位置，
+        // 再次进入时选框与上次保存时完全一致
+        val fullRatio = bitmap.width.toFloat() / bitmap.height
+        val restored = remember {
+            WidgetPrefs.cropRect(context, appWidgetId)?.let { r ->
+                val savedRatio = ((r[2] - r[0]) * bitmap.width) / ((r[3] - r[1]) * bitmap.height)
+                // 期望比例：锁定模式用组件比例；自由模式先匹配预设（≈全图比例归到全图），都不匹配则沿用原比例
+                val desired: Float? = aspect
+                    ?: RATIO_PRESETS.map { it.second }.firstOrNull { p ->
+                        val eff = p ?: fullRatio
+                        kotlin.math.abs(eff - savedRatio) / eff < 0.02f
+                    }.let { matched ->
+                        when {
+                            matched != null -> matched
+                            kotlin.math.abs(fullRatio - savedRatio) / fullRatio < 0.02f -> null
+                            else -> savedRatio
+                        }
+                    }
+                // 用与下方基准框相同的公式反推缩放系数
+                val bw: Float
+                val bh: Float
+                if (desired == null || dispW / dispH <= desired) {
+                    bw = dispW
+                    bh = if (desired == null) dispH else dispW / desired
+                } else {
+                    bh = dispH
+                    bw = dispH * desired
+                }
+                val w = (r[2] - r[0]) * dispW
+                InitialCrop(
+                    preset = if (aspect != null) null else desired,
+                    scale = (w / bw).coerceIn(0.25f, 1f),
+                    cx = ((r[0] + r[2]) / 2f - 0.5f) * dispW,
+                    cy = ((r[1] + r[3]) / 2f - 0.5f) * dispH
+                )
+            }
+        }
+        var ratioPreset by remember { mutableStateOf(restored?.preset) }
+        var boxScale by remember { mutableFloatStateOf(restored?.scale ?: 1f) }
+        var centerX by remember { mutableFloatStateOf(restored?.cx ?: 0f) }  // 相对图片中心，px
+        var centerY by remember { mutableFloatStateOf(restored?.cy ?: 0f) }
+        val effectiveAspect = aspect ?: ratioPreset
+
+        // 基准选框：有比例时为内切图片的同比例最大矩形；无比例（全图）时铺满整图
         val baseW: Float
         val baseH: Float
-        if (dispW / dispH > aspect) {
-            baseH = dispH
-            baseW = dispH * aspect
-        } else {
+        if (effectiveAspect == null || dispW / dispH <= effectiveAspect) {
             baseW = dispW
-            baseH = dispW / aspect
-        }
-
-        var boxScale by remember { mutableFloatStateOf(1f) }
-        var centerX by remember { mutableFloatStateOf(0f) }  // 相对图片中心，px
-        var centerY by remember { mutableFloatStateOf(0f) }
-        var initialized by remember { mutableStateOf(false) }
-
-        // 已有裁剪则还原选框位置
-        if (!initialized) {
-            initialized = true
-            WidgetPrefs.cropRect(context, appWidgetId)?.let { r ->
-                val w = (r[2] - r[0]) * dispW
-                boxScale = (w / baseW).coerceIn(0.25f, 1f)
-                centerX = ((r[0] + r[2]) / 2f - 0.5f) * dispW
-                centerY = ((r[1] + r[3]) / 2f - 0.5f) * dispH
-            }
+            baseH = if (effectiveAspect == null) dispH else dispW / effectiveAspect
+        } else {
+            baseH = dispH
+            baseW = dispH * effectiveAspect
         }
 
         val boxW = baseW * boxScale
@@ -277,8 +364,39 @@ private fun CropArea(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // 自由框选时的比例预设（组件比例锁定时不显示）
+            if (aspect == null) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    RATIO_PRESETS.forEach { (label, value) ->
+                        FilterChip(
+                            selected = ratioPreset == value,
+                            onClick = {
+                                ratioPreset = value
+                                // 换比例后重置选框，避免新旧比例叠加出怪位置
+                                boxScale = 1f
+                                centerX = 0f
+                                centerY = 0f
+                            },
+                            label = {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // 形状示意（全图用图片自身比例）
+                                    RatioShapeGlyph(value ?: fullRatio)
+                                    Spacer(Modifier.width(6.dp))
+                                    Text(label)
+                                }
+                            }
+                        )
+                    }
+                }
+            }
             Text(
-                "拖动移动选框，双指缩放调整范围；选框比例与当前组件一致",
+                if (aspect == null) "拖动移动选框，双指缩放调整范围；所选区域会铺满组件显示"
+                else "拖动移动选框，双指缩放调整范围；选框比例与当前组件一致",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )
@@ -291,7 +409,8 @@ private fun CropArea(
                         android.content.Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
                     )
                     (context as? WidgetCropActivity)?.lifecycleScope?.launch {
-                        runCatching { TodoWidget().updateAll(context) }
+                        // 统一刷新管线：bump 数据版本号保证组件真正重绘（直接 update 可能被静默忽略）
+                        runCatching { WidgetUpdater.refresh(context) }
                     }
                     onClose()
                 },

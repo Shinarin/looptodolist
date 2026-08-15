@@ -21,7 +21,7 @@ export JAVA_HOME="C:/Program Files/Android/Android Studio/jbr"   # 系统无独�
 - **领域层** `domain/`：`RecurrenceEngine`（纯函数：循环起点/显示窗口计算，NONE/INTERVAL_DAYS/WEEKLY/MONTHLY；WEEKLY/MONTHLY 支持 anchorDate——首个循环不早于 anchor，`anchorDate<=0` 保持旧行为）、`RolloverManager`（结算：到期作废+生成新循环；NONE 有持续天数时到期作废不续期，且创建/编辑即过期立即作废；编辑模板走 `regenerateActiveInstance` 修正当前实例——起点失效则作废/改挂再结算；`reviveTemplate` 复活已作废一次性任务；四个 public 入口共用一把 Mutex）、`WallpaperCrop`（cover 裁剪窗口纯函数）、`Models`（枚举 + `toRecurrenceType()`/`toWindowMode()` 兜底扩展）。
 - **数据层** `data/`：Room 三表 categories/task_templates/task_instances；模板存规则，实例存某次循环的窗口与状态（ACTIVE/COMPLETED/EXPIRED）。DB v3（v2→v3 去重并加实例表 `(templateId, cycleStart)` 唯一索引；exportSchema 开，schema 在 `app/schemas/`）。模板/分类保存走 insert/update 分流（**不要用 REPLACE 插入模板**——会触发实例表 FK CASCADE 清空历史）。主页数据 = 每模板最新实例分未完成/已完成/已作废三区再按分类分组（`TodoRepository.observeHomeData`）。
 - **统一管线** `sync/DataSyncManager`：任何任务/模板/分类写操作后调 `settleAndRefresh()`——结算（rolloverAll）→ 全量重排提醒（只排 ACTIVE，刚完成/删除的自动跳过）→ 刷新所有桌面组件。三步全量幂等、单步失败互不影响。
-- **UI** `ui/`：底部三栏（清单/日历/设置，`AppNav`，NavHost fade 150ms）。所有页面用紧凑标题栏（statusBarsPadding + 小 padding，**不用原生 TopAppBar**——它比紧凑栏矮一截留白多）。主页紧凑标题栏+三分区（未完成/已完成划线/已作废可重新开启）+加载态；左滑删除弹确认；分类折叠状态在 ViewModel。日历页用引擎对任意日期（含未来）计算当天任务，打点=循环更新日，有"回到今天"。编辑页开始日期（不循环/每N天直接设；每周/每月经"指定开始日期"开关）、显示时段（整循环/长期有效 vs 自定义 N 天，≥1）；脏状态返回弹放弃确认；编辑模式有删除入口。删除任务/分类均有确认弹窗。
+- **UI** `ui/`：底部三栏（清单/日历/设置，`AppNav`，NavHost fade 150ms）。所有页面用紧凑标题栏（statusBarsPadding + 小 padding，**不用原生 TopAppBar**——它比紧凑栏矮一截留白多）。主页紧凑标题栏+三分区（未完成/已完成划线/已作废可点击编辑、左滑删除、重新开启）+加载态；左滑删除弹确认；分类折叠状态在 ViewModel；主页与日历页任务列表底部留白 88dp 避让悬浮添加按钮。日历页用引擎对任意日期（含未来）计算当天任务，打点=循环更新日，有"回到今天"。编辑页开始日期（不循环/每N天直接设；每周/每月经"指定开始日期"开关）、显示时段（整循环/长期有效 vs 自定义 N 天，≥1）；脏状态返回弹放弃确认；编辑模式有删除入口。删除任务/分类均有确认弹窗。
 - **小组件** `widget/`：Glance `TodoWidget`（SizeMode.Exact）。要点：
   - **刷新模型（Glance 1.1.1 的坑，已踩过）**：`update()` 只在 Glance Preferences 内容变化时才触发重组，且 `provideGlance` 每个会话只执行一次（`provideContent` 设计上不返回）——Room 数据变化本身驱动不了重组，会话存活期（约几十秒）内直接调 update 会被静默忽略，表现为"点了没反应"。所以统一走 `WidgetUpdater.refresh(context)`：先 bump `KEY_DATA_VERSION` 再 update；组合内用 `produceState(key1 = dataVersion)` 重读数据库/壁纸，SharedPreferences 外观值重组时直接读。不要在 provideGlance 里一次性读数据就完事。
   - 结算不放进组件链路（在 App/Worker/动作里做），壁纸位图有文件级缓存（解码在 IO 线程） → 刷新快。
@@ -77,4 +77,4 @@ app/src/main/java/com/gametodolist/
 
 - 改动任务状态/模板/分类后，统一走 `DataSyncManager.settleAndRefresh()`（不要手工组合 rollover/重排提醒/刷新组件，防漏步）；仅外观设置改动仍调 `WidgetUpdater.refresh(context)`。
 - 新语义靠纯函数 + JVM 单测落地（引擎、结算、裁剪），数据完整性靠 Robolectric 集成测试，UI 冒烟在 Pixel_6 模拟器上逐条截图验证。
-- 已完成任务不消失：划线归到已完成区，点实心勾撤销；组件上整行点击即完成/取消。已作废的一次性任务归已作废区，可"重新开启"（从今天开始重算窗口）。
+- 已完成任务不消失：划线归到已完成区，点实心勾撤销；组件上整行点击即完成/取消。已作废的一次性任务归已作废区，可点击编辑、左滑删除、"重新开启"（从今天开始重算窗口）。

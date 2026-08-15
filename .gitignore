@@ -9,3 +9,6 @@ local.properties
 .cxx/
 captures/
 .externalNativeBuild/
+
+# 本地发布产物（历史版本 APK 等）
+dist/

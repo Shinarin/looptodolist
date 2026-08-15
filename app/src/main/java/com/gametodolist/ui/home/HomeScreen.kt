@@ -129,7 +129,8 @@ fun HomeScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(padding),
-            contentPadding = PaddingValues(horizontal = 16.dp, vertical = 8.dp),
+            // 底部留白避开悬浮添加按钮，防止遮住最后一项
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 8.dp, bottom = 88.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // ---------- 未完成区 ----------
@@ -172,10 +173,12 @@ fun HomeScreen(
                 data.expiredGroups.forEach { group ->
                     group.items.forEach { item ->
                         item(key = "expired_${group.category?.id ?: -1L}_${item.template.id}") {
-                            ExpiredTaskCard(
+                            SwipeableExpiredCard(
                                 item = item,
                                 color = group.color(),
-                                onRevive = { viewModel.revive(item) }
+                                onRevive = { viewModel.revive(item) },
+                                onRequestDelete = { pendingDelete = item },
+                                onClick = { onEditTask(item.template.id) }
                             )
                         }
                     }
@@ -350,13 +353,57 @@ private fun SwipeableTaskCard(
     }
 }
 
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun SwipeableExpiredCard(
+    item: TemplateWithInstance,
+    color: Color,
+    onRevive: () -> Unit,
+    onRequestDelete: () -> Unit,
+    onClick: () -> Unit
+) {
+    val dismissState = rememberSwipeToDismissBoxState(
+        confirmValueChange = { value ->
+            // 仅左滑删除：只通知外部弹确认窗，不直接 dismiss；右滑不响应
+            if (value == SwipeToDismissBoxValue.EndToStart) onRequestDelete()
+            false
+        }
+    )
+
+    SwipeToDismissBox(
+        state = dismissState,
+        enableDismissFromStartToEnd = false,
+        backgroundContent = {
+            val deleting = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(
+                        if (deleting) ExpiredRed else Color.Transparent,
+                        MaterialTheme.shapes.medium
+                    )
+                    .padding(horizontal = 20.dp),
+                contentAlignment = Alignment.CenterEnd
+            ) {
+                if (deleting) {
+                    Text("删除", color = Color.White, style = MaterialTheme.typography.labelLarge)
+                }
+            }
+        }
+    ) {
+        ExpiredTaskCard(item = item, color = color, onRevive = onRevive, onClick = onClick)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun ExpiredTaskCard(
     item: TemplateWithInstance,
     color: Color,
-    onRevive: () -> Unit
+    onRevive: () -> Unit,
+    onClick: () -> Unit
 ) {
-    Card(modifier = Modifier.fillMaxWidth()) {
+    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically

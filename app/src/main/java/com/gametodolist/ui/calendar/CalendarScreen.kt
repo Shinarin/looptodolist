@@ -5,6 +5,7 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
@@ -164,7 +165,11 @@ fun CalendarScreen(
             if (dayItems.isEmpty()) {
                 EmptyState(text = "这一天没有任务")
             } else {
-                LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                LazyColumn(
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    // 底部留白避开悬浮添加按钮，防止遮住最后一项
+                    contentPadding = PaddingValues(bottom = 88.dp)
+                ) {
                     items(dayItems, key = { it.item.template.id }) { dayItem ->
                         DayItemCard(
                             dayItem = dayItem,

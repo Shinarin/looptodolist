@@ -134,7 +134,7 @@ suspend fun settleAndRefresh() {
 
 底部三栏（清单 / 日历 / 设置）+ 两个二级页（分类管理、任务编辑），`AppNav.kt` NavHost，切换动画 fade 150ms。编辑路由 `edit?templateId={}&anchorDate={}`（-1 表示新建 / 未指定日期）。**所有页面统一用紧凑标题栏**（`statusBarsPadding` + 小 padding），不用原生 `TopAppBar`（它比紧凑栏多一截顶部留白）。
 
-- **主页** `home/`：紧凑标题栏 + 三分区（未完成 / 已完成划线 / 已作废可"重新开启"）+ 分类分组折叠（折叠状态在 `HomeViewModel`，切 tab 不丢）。左滑删除弹确认。`HomeViewModel.init` 触发一次 `settleAndRefresh()`（即"回 App 即结算"）。
+- **主页** `home/`：紧凑标题栏 + 三分区（未完成 / 已完成划线 / 已作废可点击编辑、左滑删除、"重新开启"）+ 分类分组折叠（折叠状态在 `HomeViewModel`，切 tab 不丢）。左滑删除弹确认。任务列表底部留白 88dp 避让悬浮添加按钮（日历页同理）。`HomeViewModel.init` 触发一次 `settleAndRefresh()`（即"回 App 即结算"）。
 - **日历页** `calendar/`：不查库预演——对每个模板用引擎算所选日期的窗口，覆盖该日即显示；该循环已有真实实例则取真实状态。月视图打点 = 循环更新日。未来日期可看。"回到今天"按钮。点"+"进编辑页时带入所选日期为默认开始日期。
 - **编辑页** `edit/`：开始日期（NONE/INTERVAL_DAYS 直接显示日期选择；WEEKLY/MONTHLY 经"指定开始日期"开关，不开则 anchorDate=0 立即开始）、显示时段（整循环 vs 自定义 N 天）、提醒开关与提前量。脏状态返回弹"放弃修改"确认（快照对比，忽略 saving/saved 等过程字段）。编辑模式有删除入口（带确认）。保存后若是编辑，先 `regenerateActiveInstance` 再走统一管线。
 - **分类管理** `category/`：增删改 + 色板（FlowRow 横纵都留间距），删除有确认。

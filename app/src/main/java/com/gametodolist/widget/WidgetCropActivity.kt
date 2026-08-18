@@ -39,6 +39,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
@@ -73,6 +74,9 @@ class WidgetCropActivity : ComponentActivity() {
         val appWidgetId = intent.getIntExtra(
             AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID
         )
+        // 挂起模式：来自换壁纸中转页，裁剪的是挂起文件。
+        // 点保存才原子替换正式壁纸；取消/返回丢弃挂起文件，旧壁纸与裁剪区域原样保留。
+        val pendingMode = intent.getBooleanExtra(EXTRA_PENDING, false)
         // null = 桌面未上报组件尺寸，自由框选。
         // intent 里的 aspect 来自组合时的 LocalSize，仅在桌面上报精确尺寸（SIZES 非空）时才可信
         // （荣耀等 Launcher 的 SIZES 为空，LocalSize 是用 min/max 乱拼的，不能用）
@@ -82,17 +86,41 @@ class WidgetCropActivity : ComponentActivity() {
         // configure 流程（API 26-30 添加组件时系统强制经过本页）：取消/返回/无壁纸都放行添加
         // （RESULT_CANCELED 会让组件加不上桌面），壁纸用默认居中裁剪，之后可随时再裁剪
         setResult(RESULT_OK, android.content.Intent().putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId))
-        if (!WidgetPrefs.hasWallpaper(this)) {
+        if (pendingMode) {
+            val p = WallpaperImporter.pendingFile(this)
+            if (!p.exists() || p.length() <= 0L) {
+                finish()
+                return
+            }
+            // 返回键 = 取消：丢弃挂起文件（「取消」按钮在 onClose 里统一处理）
+            onBackPressedDispatcher.addCallback(
+                this,
+                object : androidx.activity.OnBackPressedCallback(true) {
+                    override fun handleOnBackPressed() {
+                        WallpaperImporter.discardPending(this@WidgetCropActivity)
+                        finish()
+                    }
+                }
+            )
+        } else if (!WidgetPrefs.hasWallpaper(this)) {
             // 未设壁纸时裁剪无意义，直接放行
             finish()
             return
         }
         setContent {
-            GameTodoTheme {
+            val themeId by remember {
+                WidgetEntryPoint.get(this@WidgetCropActivity).settingsPrefs().themeId
+            }.collectAsStateWithLifecycle()
+            GameTodoTheme(themeId = themeId) {
                 CropScreen(
                     appWidgetId = appWidgetId,
                     aspect = aspect,
-                    onClose = { finish() }
+                    pending = pendingMode,
+                    onClose = {
+                        // 挂起模式下任何关闭路径（取消/保存后）都确保挂起文件不残留
+                        if (pendingMode) WallpaperImporter.discardPending(this@WidgetCropActivity)
+                        finish()
+                    }
                 )
             }
         }
@@ -136,6 +164,8 @@ class WidgetCropActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_ASPECT = "com.gametodolist.extra.WIDGET_ASPECT"
+        /** true = 挂起模式：裁剪换壁纸流程的挂起文件，保存才生效，取消丢弃 */
+        const val EXTRA_PENDING = "com.gametodolist.extra.WALLPAPER_PENDING"
     }
 }
 
@@ -171,13 +201,20 @@ private fun RatioShapeGlyph(ratio: Float) {
 private fun CropScreen(
     appWidgetId: Int,
     aspect: Float?,
+    pending: Boolean,
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
     val bitmap by produceState<Bitmap?>(null) {
         value = withContext(Dispatchers.IO) {
-            if (WidgetPrefs.hasWallpaper(context)) {
-                runCatching { BitmapFactory.decodeFile(WidgetPrefs.wallpaperFile(context).absolutePath) }.getOrNull()
+            // 挂起模式裁挂起文件（未生效的新壁纸），否则裁当前正式壁纸
+            val f = if (pending) {
+                WallpaperImporter.pendingFile(context)
+            } else {
+                WidgetPrefs.wallpaperFile(context)
+            }
+            if (f.exists() && f.length() > 0) {
+                runCatching { BitmapFactory.decodeFile(f.absolutePath) }.getOrNull()
             } else null
         }
     }
@@ -216,6 +253,7 @@ private fun CropScreen(
                 bitmap = bmp,
                 aspect = aspect,
                 appWidgetId = appWidgetId,
+                pending = pending,
                 onClose = onClose
             )
         }
@@ -227,6 +265,7 @@ private fun CropArea(
     bitmap: Bitmap,
     aspect: Float?,
     appWidgetId: Int,
+    pending: Boolean,
     onClose: () -> Unit
 ) {
     val context = LocalContext.current
@@ -247,8 +286,9 @@ private fun CropArea(
         // 初始恢复：从已保存的裁剪区域还原比例（含非预设的自定义比例）、大小与位置，
         // 再次进入时选框与上次保存时完全一致
         val fullRatio = bitmap.width.toFloat() / bitmap.height
+        // 挂起模式裁的是新图，旧图的已存裁剪区域无意义，从全图重新开始（与更换壁纸清空区域语义一致）
         val restored = remember {
-            WidgetPrefs.cropRect(context, appWidgetId)?.let { r ->
+            if (pending) null else WidgetPrefs.cropRect(context, appWidgetId)?.let { r ->
                 val savedRatio = ((r[2] - r[0]) * bitmap.width) / ((r[3] - r[1]) * bitmap.height)
                 // 期望比例：锁定模式用组件比例；自由模式先匹配预设（≈全图比例归到全图），都不匹配则沿用原比例
                 val desired: Float? = aspect
@@ -403,6 +443,14 @@ private fun CropArea(
             Button(
                 onClick = {
                     val r = currentRectFractions()
+                    if (pending && !WallpaperImporter.commitPending(context)) {
+                        // 挂起文件失效（极少见）：不关闭页面，可取消返回
+                        android.widget.Toast.makeText(
+                            context, "壁纸保存失败，请重新选择", android.widget.Toast.LENGTH_SHORT
+                        ).show()
+                        return@Button
+                    }
+                    // 注意顺序：commitPending 会清空所有裁剪区域，新区域必须在其后写入
                     WidgetPrefs.setCropRect(context, appWidgetId, r[0], r[1], r[2], r[3])
                     (context as? WidgetCropActivity)?.setResult(
                         android.app.Activity.RESULT_OK,

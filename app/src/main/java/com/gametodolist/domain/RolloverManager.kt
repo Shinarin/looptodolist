@@ -43,17 +43,12 @@ class RolloverManager @Inject constructor(
         zone: ZoneId = ZoneId.systemDefault()
     ) = mutex.withLock { regenerateLocked(template, nowMillis, zone) }
 
-    /** 「重新开启」已作废任务：最新 EXPIRED 实例改回 ACTIVE 并按当前规则（新 anchor）重算窗口 */
+    /** 「重新开启」已作废任务：交给 [regenerateLocked] 统一处理（它会先复活已作废实例再按规则修正） */
     suspend fun reviveTemplate(
         template: TaskTemplateEntity,
         nowMillis: Long = System.currentTimeMillis(),
         zone: ZoneId = ZoneId.systemDefault()
-    ) = mutex.withLock {
-        val latest = instanceDao.getLatestForTemplate(template.id) ?: return@withLock
-        if (latest.status != InstanceStatus.EXPIRED.name) return@withLock
-        instanceDao.markActive(latest.id)
-        regenerateLocked(template, nowMillis, zone)
-    }
+    ) = mutex.withLock { regenerateLocked(template, nowMillis, zone) }
 
     // ---------- 私有实现（调用方须已持锁） ----------
 
@@ -100,7 +95,13 @@ class RolloverManager @Inject constructor(
         zone: ZoneId
     ) {
         val today = Instant.ofEpochMilli(nowMillis).atZone(zone).toLocalDate()
-        val latest = instanceDao.getLatestForTemplate(template.id)
+        var latest = instanceDao.getLatestForTemplate(template.id)
+        // 已作废任务被编辑或「重新开启」：先把最新实例恢复 ACTIVE 再走正常修正——
+        // 旧循环实例会在下方按新规则重新作废留痕或就地改挂；否则已作废任务永远救不回来
+        if (latest != null && latest.status == InstanceStatus.EXPIRED.name) {
+            instanceDao.markActive(latest.id)
+            latest = latest.copy(status = InstanceStatus.ACTIVE.name)
+        }
         if (latest != null && latest.status == InstanceStatus.ACTIVE.name) {
             val expected = RecurrenceEngine.currentCycleStartDate(today, template, zone)
             val latestCycle = Instant.ofEpochMilli(latest.cycleStart).atZone(zone).toLocalDate()
@@ -109,9 +110,24 @@ class RolloverManager @Inject constructor(
                 val existing = instanceDao.findByCycle(template.id, expectedStart)
                 when {
                     existing != null -> {
-                        // 目标循环已有历史实例：保留历史（COMPLETED/EXPIRED 不动），
+                        // 目标循环已有历史实例：保留历史（COMPLETED 不动），
                         // 删除旧规则下的幻影实例，避免 REPLACE 撞唯一索引销毁历史
                         instanceDao.deleteById(latest.id)
+                        // 历史实例已作废但窗口仍覆盖现在（之前编辑留痕所致）：
+                        // 复活它并按新规则重算窗口，否则任务会卡在已作废区
+                        if (existing.status == InstanceStatus.EXPIRED.name &&
+                            (existing.windowEnd == Long.MAX_VALUE || existing.windowEnd > nowMillis)
+                        ) {
+                            val window = RecurrenceEngine.computeWindow(expected, template, zone)
+                            instanceDao.update(
+                                existing.copy(
+                                    status = InstanceStatus.ACTIVE.name,
+                                    completedAt = null,
+                                    windowStart = window.startMillis,
+                                    windowEnd = window.endMillis
+                                )
+                            )
+                        }
                     }
                     expected > latestCycle -> {
                         // 起点前移（旧循环起点在新规则下已过时）：作废弃置留痕，按新规则建新实例

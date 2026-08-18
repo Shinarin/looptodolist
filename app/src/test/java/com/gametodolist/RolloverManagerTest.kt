@@ -395,4 +395,82 @@ class RolloverManagerTest {
         assertEquals(millisOf(LocalDate.of(2025, 1, 10)), revived.windowStart)
         assertEquals(millisOf(LocalDate.of(2025, 1, 13)), revived.windowEnd)
     }
+
+    @Test
+    fun `复活已作废的循环任务 窗口未过直接复活原实例`() = runTest {
+        // 场景：编辑留痕导致循环任务最新实例 EXPIRED 但窗口仍覆盖现在（不会自动续期）
+        val instances = FakeInstanceDao(
+            mutableListOf(
+                TaskInstanceEntity(
+                    id = 1,
+                    templateId = 1,
+                    cycleStart = millisOf(LocalDate.of(2025, 1, 13)),   // 周一
+                    windowStart = millisOf(LocalDate.of(2025, 1, 13)),
+                    windowEnd = millisOf(LocalDate.of(2025, 1, 15)),     // 周三
+                    status = "EXPIRED"
+                )
+            )
+        )
+        val m = manager(mutableListOf(weeklyTemplate()), instances)
+
+        // 2025-01-14 周二，窗口内：复活后应直接恢复 ACTIVE，不产生新实例
+        m.reviveTemplate(weeklyTemplate(), millisOf(LocalDate.of(2025, 1, 14), 10), zone)
+
+        assertEquals(1, instances.instances.size)
+        val revived = instances.instances[0]
+        assertEquals(InstanceStatus.ACTIVE.name, revived.status)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 13)), revived.cycleStart)
+    }
+
+    @Test
+    fun `复活已作废的循环任务 旧循环留痕并生成当前循环`() = runTest {
+        // 场景：最新实例是更早循环的 EXPIRED，复活应留痕旧实例并补当前循环
+        val instances = FakeInstanceDao(
+            mutableListOf(
+                TaskInstanceEntity(
+                    id = 1,
+                    templateId = 1,
+                    cycleStart = millisOf(LocalDate.of(2025, 1, 6)),    // 上周一
+                    windowStart = millisOf(LocalDate.of(2025, 1, 6)),
+                    windowEnd = millisOf(LocalDate.of(2025, 1, 8)),
+                    status = "EXPIRED"
+                )
+            )
+        )
+        val m = manager(mutableListOf(weeklyTemplate()), instances)
+
+        m.reviveTemplate(weeklyTemplate(), millisOf(LocalDate.of(2025, 1, 14), 10), zone)
+
+        assertEquals(2, instances.instances.size)
+        assertEquals(InstanceStatus.EXPIRED.name, instances.instances.first { it.id == 1L }.status)
+        val active = instances.instances.single { it.status == InstanceStatus.ACTIVE.name }
+        assertEquals(millisOf(LocalDate.of(2025, 1, 13)), active.cycleStart)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 15)), active.windowEnd)
+    }
+
+    @Test
+    fun `编辑已作废模板保存后复活`() = runTest {
+        // 一次性任务到期作废后，编辑把开始日期改到今天再保存：应复活而不是停在已作废
+        val template = TaskTemplateEntity(
+            id = 1, categoryId = null, title = "一次性", recurrenceType = "NONE",
+            windowMode = "CUSTOM", customWindowDays = 3,
+            anchorDate = millisOf(LocalDate.of(2025, 1, 10))
+        )
+        val instances = FakeInstanceDao()
+        val m = manager(mutableListOf(template), instances)
+        m.rolloverAll(millisOf(LocalDate.of(2025, 1, 14), 10), zone)   // 创建即过期作废
+        assertEquals(InstanceStatus.EXPIRED.name, instances.instances[0].status)
+
+        // 编辑保存（开始日期改到 1-14）：走 regenerateActiveInstance
+        m.regenerateActiveInstance(
+            template.copy(anchorDate = millisOf(LocalDate.of(2025, 1, 14))),
+            millisOf(LocalDate.of(2025, 1, 14), 12), zone
+        )
+
+        assertEquals(1, instances.instances.size)
+        val revived = instances.instances[0]
+        assertEquals(InstanceStatus.ACTIVE.name, revived.status)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 14)), revived.windowStart)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 17)), revived.windowEnd)
+    }
 }

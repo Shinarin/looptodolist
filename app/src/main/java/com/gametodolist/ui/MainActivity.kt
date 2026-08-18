@@ -8,12 +8,19 @@ import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.runtime.getValue
 import androidx.core.content.ContextCompat
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gametodolist.data.SettingsPrefs
 import com.gametodolist.ui.theme.GameTodoTheme
 import dagger.hilt.android.AndroidEntryPoint
+import javax.inject.Inject
 
 @AndroidEntryPoint
 class MainActivity : ComponentActivity() {
+
+    @Inject
+    lateinit var settingsPrefs: SettingsPrefs
 
     private val notificationPermissionLauncher =
         registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
@@ -23,7 +30,8 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
         askNotificationPermissionIfNeeded()
         setContent {
-            GameTodoTheme {
+            val themeId by settingsPrefs.themeId.collectAsStateWithLifecycle()
+            GameTodoTheme(themeId = themeId) {
                 AppNav()
             }
         }

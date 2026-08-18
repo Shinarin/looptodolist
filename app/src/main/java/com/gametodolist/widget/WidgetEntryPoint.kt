@@ -13,6 +13,7 @@ import android.content.Context
 interface WidgetEntryPoint {
     fun repository(): TodoRepository
     fun dataSync(): DataSyncManager
+    fun settingsPrefs(): com.gametodolist.data.SettingsPrefs
 
     companion object {
         fun get(context: Context): WidgetEntryPoint =

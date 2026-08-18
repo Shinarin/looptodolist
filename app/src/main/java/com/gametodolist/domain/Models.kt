@@ -17,14 +17,14 @@ fun String?.toRecurrenceType(): RecurrenceType =
 fun String?.toWindowMode(): WindowMode =
     runCatching { WindowMode.valueOf(this.orEmpty()) }.getOrDefault(WindowMode.FULL_CYCLE)
 
-/** 预设分类色板（柔和配色） */
+/** 预设分类色板（图鉴色系） */
 val CATEGORY_COLOR_PRESETS: List<Long> = listOf(
-    0xFF7FB69E, // 抹茶绿
-    0xFF8EA7E9, // 雾蓝
-    0xFFE9A2B2, // 樱粉
-    0xFFF0B67F, // 杏橙
-    0xFFB39DDB, // 薰衣草紫
-    0xFF80CBC4, // 青碧
-    0xFFE6C97A, // 米黄
+    0xFF5B8DEF, // 图鉴蓝
+    0xFFFF7BAC, // 糖果粉
+    0xFFF7B733, // 金币黄
+    0xFF45C48A, // 通关绿
+    0xFF9D6CFF, // 魔法紫
+    0xFF4ECDC4, // 水晶青
+    0xFFFF9A5C, // 活力橙
     0xFF9E9E9E  // 暖灰
 )

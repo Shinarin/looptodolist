@@ -12,3 +12,6 @@ captures/
 
 # 本地发布产物（历史版本 APK 等）
 dist/
+
+# 美化方案效果图等过程产物（本地保留）
+docs/design/

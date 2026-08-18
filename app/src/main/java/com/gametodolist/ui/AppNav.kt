@@ -9,8 +9,10 @@ import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,24 +61,33 @@ fun AppNav() {
         bottomBar = {
             // 三个主功能页：清单 / 日历 / 设置
             if (currentRoute in mainRoutes) {
+                // 选中态：主色图标文字 + primaryContainer 胶囊指示
+                val itemColors = NavigationBarItemDefaults.colors(
+                    selectedIconColor = MaterialTheme.colorScheme.primary,
+                    selectedTextColor = MaterialTheme.colorScheme.primary,
+                    indicatorColor = MaterialTheme.colorScheme.primaryContainer
+                )
                 NavigationBar {
                     NavigationBarItem(
                         selected = currentRoute == Routes.HOME,
                         onClick = { navigateMain(Routes.HOME) },
                         icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
-                        label = { Text("清单") }
+                        label = { Text("清单") },
+                        colors = itemColors
                     )
                     NavigationBarItem(
                         selected = currentRoute == Routes.CALENDAR,
                         onClick = { navigateMain(Routes.CALENDAR) },
                         icon = { Icon(Icons.Default.DateRange, contentDescription = null) },
-                        label = { Text("日历") }
+                        label = { Text("日历") },
+                        colors = itemColors
                     )
                     NavigationBarItem(
                         selected = currentRoute == Routes.SETTINGS,
                         onClick = { navigateMain(Routes.SETTINGS) },
                         icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                        label = { Text("设置") }
+                        label = { Text("设置") },
+                        colors = itemColors
                     )
                 }
             }

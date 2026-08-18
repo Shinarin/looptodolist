@@ -4,11 +4,10 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.os.Build
 import android.provider.Settings
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.PickVisualMediaRequest
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -20,14 +19,18 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +39,7 @@ import androidx.compose.material3.SegmentedButton
 import androidx.compose.material3.SegmentedButtonDefaults
 import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -45,6 +49,8 @@ import androidx.compose.runtime.produceState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
@@ -57,7 +63,10 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.gametodolist.ui.theme.DEFAULT_THEME_ID
+import com.gametodolist.ui.theme.THEME_PRESETS
 import com.gametodolist.widget.WidgetPrefs
+import com.gametodolist.widget.WidgetWallpaperPickActivity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -70,19 +79,18 @@ fun SettingsScreen(
     val wallpaper by viewModel.wallpaper.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
-    // 从系统设置页返回后刷新精确闹钟授权状态
+    // 从系统设置页 / 换壁纸流程（中转页→裁剪页）返回后，刷新授权状态与壁纸预览
     val lifecycleOwner = LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) viewModel.refreshExactAlarmState()
+            if (event == Lifecycle.Event.ON_RESUME) {
+                viewModel.refreshExactAlarmState()
+                viewModel.refreshWallpaperState()
+            }
         }
         lifecycleOwner.lifecycle.addObserver(observer)
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
-
-    val pickImage = rememberLauncherForActivityResult(
-        ActivityResultContracts.PickVisualMedia()
-    ) { uri -> uri?.let(viewModel::setWallpaper) }
 
     Scaffold(
         topBar = {
@@ -129,9 +137,79 @@ fun SettingsScreen(
             HorizontalDivider()
             Spacer(Modifier.height(4.dp))
 
+            // ---- 通用 ----
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { viewModel.setDeleteConfirmEnabled(!state.deleteConfirmEnabled) }
+                    .padding(vertical = 12.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("删除清单前提醒", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "关闭后左滑点删除不再弹确认警示",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+                Switch(
+                    checked = state.deleteConfirmEnabled,
+                    onCheckedChange = { viewModel.setDeleteConfirmEnabled(it) }
+                )
+            }
+
+            // ---- 主题颜色 ----
+            Text("主题颜色", style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
+            Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                THEME_PRESETS.forEach { preset ->
+                    val selected = state.themeId.ifEmpty { DEFAULT_THEME_ID } == preset.id
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .then(
+                                if (selected) Modifier.border(
+                                    2.5.dp, MaterialTheme.colorScheme.primary, CircleShape
+                                ) else Modifier
+                            )
+                            .padding(if (selected) 4.dp else 0.dp)
+                            .background(
+                                Brush.linearGradient(listOf(preset.primary, preset.gradientEnd)),
+                                CircleShape
+                            )
+                            .clickable(
+                                onClickLabel = preset.label,
+                                role = androidx.compose.ui.semantics.Role.Button
+                            ) { viewModel.setThemeId(preset.id) },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (selected) {
+                            Icon(
+                                Icons.Default.Check,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
             // ---- 精确闹钟授权提示（仅未授权时显示） ----
             if (!state.exactAlarmGranted) {
-                Card(modifier = Modifier.fillMaxWidth()) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .shadow(
+                            elevation = 4.dp,
+                            shape = MaterialTheme.shapes.medium,
+                            spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
+                            ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+                        ),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+                ) {
                     Row(
                         modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp),
                         verticalAlignment = Alignment.CenterVertically
@@ -182,9 +260,8 @@ fun SettingsScreen(
                     state = state,
                     wallpaper = wallpaper,
                     onPick = {
-                        pickImage.launch(
-                            PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
-                        )
+                        // 统一走中转页：选图后直接进裁剪页，保存才生效
+                        context.startActivity(Intent(context, WidgetWallpaperPickActivity::class.java))
                     },
                     onClear = viewModel::clearWallpaper,
                     onDimChange = { viewModel.setWallpaperDim(100 - (it * 100).toInt()) },
@@ -193,7 +270,7 @@ fun SettingsScreen(
             }
 
             Text(
-                "说明：修改即时生效，也可点小组件右上角刷新按钮手动同步；点组件头部的裁剪按钮可框选壁纸显示区域。",
+                "说明：修改即时生效，也可点小组件右上角刷新按钮手动同步；组件头部可更换壁纸（选图后直接裁剪）与框选显示区域。",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
             )

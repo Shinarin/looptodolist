@@ -37,13 +37,21 @@
                 android:resource="@xml/todo_widget_info" />
         </receiver>
 
-        <!-- 小组件壁纸裁剪（组件裁剪按钮 / 长按菜单的设置入口） -->
+        <!-- 小组件壁纸裁剪（组件裁剪按钮 / 长按菜单的设置入口 / 换壁纸中转页） -->
         <!-- 独立 taskAffinity：从组件进入时不开进 App 主任务栈，返回键直接回桌面 -->
         <activity
             android:name=".widget.WidgetCropActivity"
             android:exported="true"
             android:taskAffinity=""
             android:excludeFromRecents="true" />
+
+        <!-- 更换壁纸中转页（无界面）：系统选图 → 挂起文件 → 直接进裁剪页，保存才生效 -->
+        <activity
+            android:name=".widget.WidgetWallpaperPickActivity"
+            android:exported="false"
+            android:taskAffinity=""
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <!-- 到期提醒 -->
         <receiver

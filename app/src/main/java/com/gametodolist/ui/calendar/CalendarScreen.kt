@@ -1,6 +1,7 @@
 package com.gametodolist.ui.calendar
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -19,12 +20,12 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material3.Card
-import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -36,6 +37,7 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
@@ -45,7 +47,11 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gametodolist.domain.InstanceStatus
 import com.gametodolist.ui.WEEKDAY_LABELS
 import com.gametodolist.ui.components.EmptyState
+import com.gametodolist.ui.components.GradientFab
 import com.gametodolist.ui.components.LabelChip
+import com.gametodolist.ui.components.RemainingChip
+import com.gametodolist.ui.components.remainingChipColors
+import com.gametodolist.ui.remainingDays
 import com.gametodolist.ui.remainingLabel
 import com.gametodolist.ui.theme.CompletedGreen
 import com.gametodolist.ui.theme.ExpiredRed
@@ -91,9 +97,7 @@ fun CalendarScreen(
         },
         floatingActionButton = {
             // 新增清单：编辑页默认日期 = 当前选中的日期
-            FloatingActionButton(onClick = { onAddTask(selectedDate.toEpochMillis()) }) {
-                Icon(Icons.Default.Add, contentDescription = "新增任务")
-            }
+            GradientFab(onClick = { onAddTask(selectedDate.toEpochMillis()) })
         }
     ) { padding ->
         Column(
@@ -272,15 +276,28 @@ private fun DayItemCard(
     onClick: () -> Unit
 ) {
     val completed = dayItem.status == InstanceStatus.COMPLETED.name
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 4.dp,
+                shape = MaterialTheme.shapes.medium,
+                spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
+                ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+            ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(10.dp)
-                    .background(color, CircleShape)
+                    .size(12.dp)
+                    .background(color, RoundedCornerShape(4.dp))
             )
             Spacer(Modifier.size(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -306,16 +323,16 @@ private fun DayItemCard(
                     LabelChip("已完成", CompletedGreen)
                 InstanceStatus.EXPIRED.name ->
                     LabelChip("已作废", ExpiredRed)
-                else ->
-                    Text(
-                        remainingLabel(
-                            dayItem.windowStart,
-                            dayItem.windowEnd,
-                            selectedDate.toEpochMillis()
-                        ),
-                        style = MaterialTheme.typography.labelMedium,
-                        color = color
+                else -> {
+                    val (fg, bg) = remainingChipColors(
+                        remainingDays(dayItem.windowStart, dayItem.windowEnd, selectedDate.toEpochMillis()),
+                        color
                     )
+                    RemainingChip(
+                        remainingLabel(dayItem.windowStart, dayItem.windowEnd, selectedDate.toEpochMillis()),
+                        fg, bg
+                    )
+                }
             }
         }
     }

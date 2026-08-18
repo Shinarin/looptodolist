@@ -68,15 +68,16 @@ class TodoRepository @Inject constructor(
 
     suspend fun deleteTemplate(id: Long) = templateDao.deleteById(id)
 
-    /** 「重新开启」已作废的一次性任务：开始日期重置为今天，实例恢复 ACTIVE 并重算窗口 */
+    /** 「重新开启」已作废任务：一次性任务开始日期重置为今天；循环任务按规则算当前循环，无需改开始日期 */
     suspend fun reviveTemplate(templateId: Long) {
         val template = templateDao.getById(templateId) ?: return
-        // 只有 NONE 任务会长期停留在已作废（循环任务结算时自动续期），其他类型忽略
-        if (template.recurrenceType.toRecurrenceType() != RecurrenceType.NONE) return
-        val today = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
-        val updated = template.copy(anchorDate = today)
-        templateDao.update(updated)
-        rolloverManager.reviveTemplate(updated)
+        val effective = if (template.recurrenceType.toRecurrenceType() == RecurrenceType.NONE) {
+            val today = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            template.copy(anchorDate = today).also { templateDao.update(it) }
+        } else {
+            template
+        }
+        rolloverManager.reviveTemplate(effective)
     }
 
     // ---------- 任务实例 ----------
@@ -92,7 +93,7 @@ class TodoRepository @Inject constructor(
     fun observeLatestInstances(): Flow<List<TaskInstanceEntity>> = instanceDao.observeLatestPerTemplate()
 
     /** 主页数据：按每个模板的最新实例分为「未完成」「已完成」「已作废」三区，
-     * 各区内再按分类分组；已作废区基本只有一次性+自定义天数任务（可重新开启）。
+     * 各区内再按分类分组；已作废区主要是一次性+自定义天数任务，也可能有编辑留痕的循环任务（均可重新开启）。
      */
     fun observeHomeData(): Flow<HomeData> =
         combine(

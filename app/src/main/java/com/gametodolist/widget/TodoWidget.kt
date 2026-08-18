@@ -262,6 +262,17 @@ private fun WidgetContent(
                 )
                 if (style.isWallpaper && appWidgetId != AppWidgetManager.INVALID_APPWIDGET_ID) {
                     Spacer(GlanceModifier.width(2.dp))
+                    // 更换壁纸：中转页选图后直接进裁剪页，保存才生效
+                    HeaderIcon(
+                        resId = R.drawable.ic_image,
+                        contentDesc = "更换壁纸",
+                        tint = style.textSecondary,
+                        onClick = actionStartActivity(
+                            Intent(context, WidgetWallpaperPickActivity::class.java)
+                                .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, appWidgetId)
+                        )
+                    )
+                    Spacer(GlanceModifier.width(2.dp))
                     // 裁剪本组件的壁纸显示区域
                     HeaderIcon(
                         resId = R.drawable.ic_crop,

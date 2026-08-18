@@ -82,11 +82,11 @@ data/ (Room: AppDatabase + 3 DAO + TodoRepository)
 职责：作废到期未完成的实例、按规则补生成新循环实例。**三个 public 入口共用一把不可重入 Mutex**：
 
 - `rolloverAll()`：全量结算。App 启动（主页/日历 VM 的 init）、WorkManager 周期任务、数据变更管线都会调到。
-- `regenerateActiveInstance(template)`：**编辑模板保存后**调用。就地修正当前 ACTIVE 实例再全量结算。三个分支：
-  - 目标循环已有历史实例 → 删旧规则下的"幻影实例"，保留历史（绝不动 COMPLETED/EXPIRED）；
+- `regenerateActiveInstance(template)`：**编辑模板保存后**调用。就地修正当前实例再全量结算。**已作废（EXPIRED）的最新实例会先恢复 ACTIVE 再修正**——所以编辑已作废任务保存即复活。三个分支：
+  - 目标循环已有历史实例 → 删旧规则下的"幻影实例"，保留历史（绝不动 COMPLETED；EXPIRED 但窗口仍覆盖现在的会复活并按新规则重算窗口，否则任务卡死在已作废区）；
   - 起点前移 → 旧实例作废弃置留痕，按新规则建新实例；
   - 起点后移且无历史 → 幻影实例就地改挂到新起点（否则主页按最大 cycleStart 取到已作废实例，任务会"隐身"）。
-- `reviveTemplate(template)`："重新开启"已作废的一次性任务（Repository 层会先把 anchorDate 重置为今天）。
+- `reviveTemplate(template)`："重新开启"已作废任务，与 regenerate 同一条路径（Repository 层对不循环任务先把 anchorDate 重置为今天；循环任务按规则算当前循环，无需改开始日期）。
 
 私有 `*Locked` 方法不加锁（Mutex 不可重入，锁只挂在 public 入口）。单次结算最多补 `MAX_CATCH_UP_CYCLES = 500` 个循环，防止长期未打开 App 时爆量插入。
 
@@ -134,11 +134,11 @@ suspend fun settleAndRefresh() {
 
 底部三栏（清单 / 日历 / 设置）+ 两个二级页（分类管理、任务编辑），`AppNav.kt` NavHost，切换动画 fade 150ms。编辑路由 `edit?templateId={}&anchorDate={}`（-1 表示新建 / 未指定日期）。**所有页面统一用紧凑标题栏**（`statusBarsPadding` + 小 padding），不用原生 `TopAppBar`（它比紧凑栏多一截顶部留白）。
 
-- **主页** `home/`：紧凑标题栏 + 三分区（未完成 / 已完成划线 / 已作废可点击编辑、左滑删除、"重新开启"）+ 分类分组折叠（折叠状态在 `HomeViewModel`，切 tab 不丢）。左滑删除弹确认。任务列表底部留白 88dp 避让悬浮添加按钮（日历页同理）。`HomeViewModel.init` 触发一次 `settleAndRefresh()`（即"回 App 即结算"）。
+- **主页** `home/`：紧凑标题栏 + 三分区（未完成 / 已完成划线 / 已作废可点击编辑、左滑删除、"重新开启"）+ 分类分组折叠（折叠状态在 `HomeViewModel`，切 tab 不丢）。**无右滑手势**（误划问题）；左滑露出红色「删除」按钮停住、点击按钮才触发删除（`SwipeRevealDeleteBox`：AnchoredDraggable 双锚点 Closed/Revealed，自实现，不用 SwipeToDismissBox——它不支持"停住露出"态）。删除警示弹窗带「不再提醒」勾选，关掉后点删除直接删；设置页「删除清单前提醒」开关可恢复（`data/SettingsPrefs.kt`，SharedPreferences `app_settings`）。任务列表底部留白 88dp 避让悬浮添加按钮（日历页同理）。`HomeViewModel.init` 触发一次 `settleAndRefresh()`（即"回 App 即结算"）。
 - **日历页** `calendar/`：不查库预演——对每个模板用引擎算所选日期的窗口，覆盖该日即显示；该循环已有真实实例则取真实状态。月视图打点 = 循环更新日。未来日期可看。"回到今天"按钮。点"+"进编辑页时带入所选日期为默认开始日期。
 - **编辑页** `edit/`：开始日期（NONE/INTERVAL_DAYS 直接显示日期选择；WEEKLY/MONTHLY 经"指定开始日期"开关，不开则 anchorDate=0 立即开始）、显示时段（整循环 vs 自定义 N 天）、提醒开关与提前量。脏状态返回弹"放弃修改"确认（快照对比，忽略 saving/saved 等过程字段）。编辑模式有删除入口（带确认）。保存后若是编辑，先 `regenerateActiveInstance` 再走统一管线。
 - **分类管理** `category/`：增删改 + 色板（FlowRow 横纵都留间距），删除有确认。
-- **设置页** `settings/`：小组件外观（纯色透明度 / 壁纸选择与压缩保存到 1080 宽 JPEG / 壁纸变暗度）+ 精确闹钟授权状态（可跳系统设置）。滑块拖动中只落盘（`persist`），松手才刷新组件，避免拖动期间狂刷 RemoteViews。壁纸"效果预览"为页面宽 60% 的居中 1:1 方形，对裁剪区域（无则用原图）做居中最大裁剪，不固定比例拉伸。**更换壁纸会清空所有已存裁剪区域**（`WidgetPrefs.clearAllCropRects()`——区域是相对旧图的相对值，对新图无意义）。
+- **设置页** `settings/`：小组件外观（纯色透明度 / 壁纸变暗度 / 更换壁纸）+ 精确闹钟授权状态（可跳系统设置）。**更换壁纸与组件头部图片按钮统一走中转页 `WidgetWallpaperPickActivity`**：系统选图 → `WallpaperImporter.saveToPending`（按屏幕长边封顶 1440..3200px、JPEG q92、先读边界按 2 的幂采样防 OOM）→ 直接进裁剪页（挂起模式），保存才生效、取消则旧壁纸原样保留（暂存式提交，见小组件节第 8 条）；返回本页时 ON_RESUME 重读落盘状态刷新预览（`refreshWallpaperState`）。滑块拖动中只落盘（`persist`），松手才刷新组件，避免拖动期间狂刷 RemoteViews。壁纸"效果预览"为页面宽 60% 的居中 1:1 方形，对裁剪区域（无则用原图）做居中最大裁剪，不固定比例拉伸。
 - `Formatters.kt`：日期/循环规则/剩余时间文案（"今日截止 / 剩 N 天 / 长期有效"等），UI 与小组件共用。
 
 ViewModel 统一模式：写操作包 `try/catch` 转成 `errorMessage` StateFlow，UI 弹 Snackbar 后 `consumeError()`。
@@ -163,7 +163,7 @@ Glance `TodoWidget`（`SizeMode.Exact` 拿真实尺寸，保证壁纸按实际�
 5. 整行点击即完成/取消完成（`CompleteTaskAction` / `UncompleteTaskAction`），动作内直接走 `DataSyncManager.settleAndRefresh()`，与 App 实时一致。
 6. 外观：纯色（透明度 20-100%）/ 壁纸（变暗 0-60%，按 appWidgetId 存裁剪矩形，千分比精度）。磨砂模式已废弃（RemoteViews 无法真模糊），历史遗留值按纯色处理。壁纸且压得较暗（≥25%）时切浅色文字。
 7. 组件删除后 `TodoWidgetReceiver.onDeleted` 清理该实例的裁剪键残留。系统触发的更新（周期/添加组件）在 `onUpdate` 里也走 `WidgetUpdater.refresh` 统一 bump 版本号。
-8. **裁剪页 `WidgetCropActivity`**：独立 `taskAffinity=""` + `excludeFromRecents`——从组件进入时不开进 App 主任务栈，返回键直接回桌面。入口：组件头部裁剪按钮（壁纸模式下显示）或长按组件的系统"设置"菜单（provider xml 配了 `configure` + `reconfigurable|configuration_optional`，API 31+ 生效）。选框可拖动/双指缩放。**选框比例只信系统上报的精确尺寸**（`OPTION_APPWIDGET_SIZES` 首个；API <31 用 min/max 中值）——荣耀等 Launcher 不上报真实尺寸（SIZES 为空、min/max 是粗范围，Glance 的 `LocalSize` 是用 maxW/minH 拼出的假值，intent 带的 aspect 同样不可信），此时改为自由框选（底部有 全图/1:1/4:3/3:4/16:9/9:16 比例预设，芯片内带比例形状示意，组件端 `ContentScale.Crop` 把所选区域铺满显示，所选即所得）。再次进入时从已存裁剪区域完整还原比例（匹配预设，2% 容差；≈全图归全图；都不匹配则用原比例作为自定义值）+ 大小 + 位置。更换壁纸会清空全部已存裁剪区域（见 §7 设置页）。保存后走 `WidgetUpdater.refresh`（直接 `updateAll` 可能被 Glance 静默忽略，见第 1 条）。API 26-30 添加组件时系统会强制拉进 configure Activity——**所有退出路径（无壁纸/取消/返回）都必须 `RESULT_OK` 携带组件 id 放行添加**，返回 CANCELED 会导致组件加不上。
+8. **裁剪页 `WidgetCropActivity`**：独立 `taskAffinity=""` + `excludeFromRecents`——从组件进入时不开进 App 主任务栈，返回键直接回桌面。入口：组件头部裁剪按钮（壁纸模式下显示）或长按组件的系统"设置"菜单（provider xml 配了 `configure` + `reconfigurable|configuration_optional`，API 31+ 生效），以及换壁纸中转页（`EXTRA_PENDING` 挂起模式：裁挂起文件而非正式壁纸，不还原旧图区域、从全图开始；保存时先 `WallpaperImporter.commitPending`——原子替换正式壁纸 + 清空全部旧裁剪区域 + 切壁纸模式——再写入新区域；取消/返回 `discardPending` 丢弃，旧壁纸原样保留）。选框可拖动/双指缩放。**选框比例只信系统上报的精确尺寸**（`OPTION_APPWIDGET_SIZES` 首个；API <31 用 min/max 中值）——荣耀等 Launcher 不上报真实尺寸（SIZES 为空、min/max 是粗范围，Glance 的 `LocalSize` 是用 maxW/minH 拼出的假值，intent 带的 aspect 同样不可信），此时改为自由框选（底部有 全图/1:1/4:3/3:4/16:9/9:16 比例预设，芯片内带比例形状示意，组件端 `ContentScale.Crop` 把所选区域铺满显示，所选即所得）。再次进入时从已存裁剪区域完整还原比例（匹配预设，2% 容差；≈全图归全图；都不匹配则用原比例作为自定义值）+ 大小 + 位置。更换壁纸在保存时清空全部已存裁剪区域（`commitPending`——区域是相对旧图的相对值，对新图无意义）。保存后走 `WidgetUpdater.refresh`（直接 `updateAll` 可能被 Glance 静默忽略，见第 1 条）。API 26-30 添加组件时系统会强制拉进 configure Activity——**所有退出路径（无壁纸/取消/返回）都必须 `RESULT_OK` 携带组件 id 放行添加**，返回 CANCELED 会导致组件加不上。
 
 ## 10. 依赖注入与入口
 
@@ -173,7 +173,7 @@ Glance `TodoWidget`（`SizeMode.Exact` 拿真实尺寸，保证壁纸按实际�
 
 ## 11. 权限与 Manifest 要点
 
-`POST_NOTIFICATIONS`（13+ 运行时请求）、`SCHEDULE_EXACT_ALARM`（14+ 可能需用户授权，代码已降级处理）、`RECEIVE_BOOT_COMPLETED`。`MainActivity` 为单 LAUNCHER；`WidgetCropActivity` exported=true（系统桌面要拉起它）。
+`POST_NOTIFICATIONS`（13+ 运行时请求）、`SCHEDULE_EXACT_ALARM`（14+ 可能需用户授权，代码已降级处理）、`RECEIVE_BOOT_COMPLETED`。`MainActivity` 为单 LAUNCHER；`WidgetCropActivity` exported=true（系统桌面要拉起它）；`WidgetWallpaperPickActivity` exported=false + 半透明主题（仅应用内与组件 PendingIntent 拉起，无界面中转页）。
 
 ## 12. 开发约定（新增功能时遵守）
 

@@ -3,6 +3,7 @@ package com.gametodolist.ui.home
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.gametodolist.data.HomeData
+import com.gametodolist.data.SettingsPrefs
 import com.gametodolist.data.TemplateWithInstance
 import com.gametodolist.data.TodoRepository
 import com.gametodolist.sync.DataSyncManager
@@ -19,8 +20,14 @@ import javax.inject.Inject
 @HiltViewModel
 class HomeViewModel @Inject constructor(
     private val repository: TodoRepository,
-    private val dataSync: DataSyncManager
+    private val dataSync: DataSyncManager,
+    private val settingsPrefs: SettingsPrefs
 ) : ViewModel() {
+
+    /** 删除清单前是否弹确认警示 */
+    val deleteConfirmEnabled: StateFlow<Boolean> = settingsPrefs.deleteConfirmEnabled
+
+    fun setDeleteConfirmEnabled(enabled: Boolean) = settingsPrefs.setDeleteConfirmEnabled(enabled)
 
     val homeData: StateFlow<HomeData?> = repository.observeHomeData()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), null)

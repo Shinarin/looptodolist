@@ -5,18 +5,28 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.rememberSplineBasedDecay
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.AnchoredDraggableState
+import androidx.compose.foundation.gestures.DraggableAnchors
+import androidx.compose.foundation.gestures.Orientation
+import androidx.compose.foundation.gestures.anchoredDraggable
+import androidx.compose.foundation.gestures.animateTo
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -24,47 +34,55 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
-import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.SnackbarHost
 import androidx.compose.material3.SnackbarHostState
-import androidx.compose.material3.SwipeToDismissBox
-import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.gametodolist.data.CategoryGroup
 import com.gametodolist.data.TemplateWithInstance
 import com.gametodolist.ui.components.EmptyState
+import com.gametodolist.ui.components.GradientFab
 import com.gametodolist.ui.components.LabelChip
 import com.gametodolist.ui.components.TaskCard
-import com.gametodolist.ui.theme.CompletedGreen
 import com.gametodolist.ui.theme.ExpiredRed
 import com.gametodolist.ui.theme.UncategorizedGray
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -74,6 +92,7 @@ fun HomeScreen(
 ) {
     val homeData by viewModel.homeData.collectAsStateWithLifecycle()
     val collapsed by viewModel.collapsed.collectAsStateWithLifecycle()
+    val deleteConfirmEnabled by viewModel.deleteConfirmEnabled.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
     var pendingDelete by remember { mutableStateOf<TemplateWithInstance?>(null) }
     val errorMessage by viewModel.errorMessage.collectAsStateWithLifecycle()
@@ -82,6 +101,11 @@ fun HomeScreen(
             snackbarHostState.showSnackbar(it)
             viewModel.consumeError()
         }
+    }
+
+    // 左滑点「删除」后的处理：开了警示则弹确认，关了（不再提醒）直接删
+    fun requestDelete(item: TemplateWithInstance) {
+        if (deleteConfirmEnabled) pendingDelete = item else viewModel.delete(item)
     }
 
     Scaffold(
@@ -103,9 +127,7 @@ fun HomeScreen(
             }
         },
         floatingActionButton = {
-            FloatingActionButton(onClick = { onEditTask(null) }) {
-                Icon(Icons.Default.Add, contentDescription = "新增任务")
-            }
+            GradientFab(onClick = { onEditTask(null) })
         }
     ) { padding ->
         val data = homeData
@@ -134,7 +156,7 @@ fun HomeScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             // ---------- 未完成区 ----------
-            sectionHeader("未完成", data.activeGroups.sumOf { it.items.size })
+            sectionHeader("未完成", data.activeGroups.sumOf { it.items.size }, "项待办")
             data.activeGroups.forEach { group ->
                 categorySection(
                     sectionKey = "active",
@@ -143,7 +165,7 @@ fun HomeScreen(
                     onToggle = viewModel::toggleCollapsed,
                     completed = false,
                     onComplete = { viewModel.complete(it) },
-                    onDelete = { pendingDelete = it },
+                    onDelete = ::requestDelete,
                     onClick = { onEditTask(it.template.id) }
                 )
             }
@@ -151,7 +173,7 @@ fun HomeScreen(
             // ---------- 已完成区（为空时不显示） ----------
             if (data.completedGroups.isNotEmpty()) {
                 item(key = "completed_divider") { Spacer(Modifier.padding(top = 8.dp)) }
-                sectionHeader("已完成", data.completedGroups.sumOf { it.items.size })
+                sectionHeader("已完成", data.completedGroups.sumOf { it.items.size }, "项")
                 data.completedGroups.forEach { group ->
                     categorySection(
                         sectionKey = "completed",
@@ -160,7 +182,7 @@ fun HomeScreen(
                         onToggle = viewModel::toggleCollapsed,
                         completed = true,
                         onComplete = { viewModel.uncomplete(it) },
-                        onDelete = { pendingDelete = it },
+                        onDelete = ::requestDelete,
                         onClick = { onEditTask(it.template.id) }
                     )
                 }
@@ -169,7 +191,7 @@ fun HomeScreen(
             // ---------- 已作废区（为空时不显示） ----------
             if (data.expiredGroups.isNotEmpty()) {
                 item(key = "expired_divider") { Spacer(Modifier.padding(top = 8.dp)) }
-                sectionHeader("已作废", data.expiredGroups.sumOf { it.items.size })
+                sectionHeader("已作废", data.expiredGroups.sumOf { it.items.size }, "项")
                 data.expiredGroups.forEach { group ->
                     group.items.forEach { item ->
                         item(key = "expired_${group.category?.id ?: -1L}_${item.template.id}") {
@@ -177,7 +199,7 @@ fun HomeScreen(
                                 item = item,
                                 color = group.color(),
                                 onRevive = { viewModel.revive(item) },
-                                onRequestDelete = { pendingDelete = item },
+                                onRequestDelete = { requestDelete(item) },
                                 onClick = { onEditTask(item.template.id) }
                             )
                         }
@@ -187,14 +209,30 @@ fun HomeScreen(
         }
     }
 
-    // 删除确认弹窗：左滑只弹确认，确认后才真正删除
+    // 删除确认弹窗：左滑露出「删除」按钮点击后才弹；勾选「不再提醒」则以后直接删
     pendingDelete?.let { item ->
+        var dontRemind by remember { mutableStateOf(false) }
         AlertDialog(
             onDismissRequest = { pendingDelete = null },
             title = { Text("删除清单？") },
-            text = { Text("「${item.template.title}」及其历史记录、提醒将一并删除，无法恢复。") },
+            text = {
+                Column {
+                    Text("「${item.template.title}」及其历史记录、提醒将一并删除，无法恢复。")
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clickable { dontRemind = !dontRemind }
+                            .padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Checkbox(checked = dontRemind, onCheckedChange = { dontRemind = it })
+                        Text("不再提醒", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            },
             confirmButton = {
                 TextButton(onClick = {
+                    if (dontRemind) viewModel.setDeleteConfirmEnabled(false)
                     viewModel.delete(item)
                     pendingDelete = null
                 }) { Text("删除", color = MaterialTheme.colorScheme.error) }
@@ -206,14 +244,27 @@ fun HomeScreen(
     }
 }
 
-private fun LazyListScope.sectionHeader(title: String, count: Int) {
+private fun LazyListScope.sectionHeader(title: String, count: Int, unit: String) {
     item(key = "section_$title") {
-        Text(
-            text = "$title · $count",
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.padding(top = 6.dp)
-        )
+        Row(
+            modifier = Modifier.padding(top = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = title,
+                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+            Spacer(Modifier.width(8.dp))
+            Surface(color = MaterialTheme.colorScheme.primaryContainer, shape = CircleShape) {
+                Text(
+                    text = "$count $unit",
+                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 3.dp)
+                )
+            }
+        }
     }
 }
 
@@ -274,20 +325,23 @@ private fun CategoryHeader(
     ) {
         Box(
             modifier = Modifier
-                .size(10.dp)
-                .background(group.color(), CircleShape)
+                .size(12.dp)
+                .background(group.color(), RoundedCornerShape(4.dp))
         )
         Spacer(Modifier.width(8.dp))
         Text(
             text = group.category?.let { "${it.icon} ${it.name}".trim() } ?: "未分类",
-            style = MaterialTheme.typography.titleSmall
+            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
         )
         Spacer(Modifier.width(8.dp))
-        Text(
-            text = "${group.items.size}",
-            style = MaterialTheme.typography.labelMedium,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
-        )
+        Surface(color = group.color().copy(alpha = 0.14f), shape = CircleShape) {
+            Text(
+                text = "${group.items.size}",
+                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                color = group.color(),
+                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+            )
+        }
         Spacer(Modifier.weight(1f))
         Icon(
             imageVector = if (collapsed) Icons.Default.KeyboardArrowDown else Icons.Default.KeyboardArrowUp,
@@ -297,7 +351,77 @@ private fun CategoryHeader(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+/** 滑动手势的锚点：收起 / 露出删除按钮 */
+private enum class SwipeAnchor { Closed, Revealed }
+
+/**
+ * 左滑露出「删除」按钮的操作行：滑动松手后停在露出态（不直接触发任何操作），
+ * 点红色「删除」按钮才走删除流程——避免误滑完成/误滑删除。反向滑回收起。
+ */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun SwipeRevealDeleteBox(
+    onRequestDelete: () -> Unit,
+    content: @Composable () -> Unit
+) {
+    val density = LocalDensity.current
+    val actionWidth = 88.dp
+    val actionWidthPx = with(density) { actionWidth.toPx() }
+    val scope = rememberCoroutineScope()
+    val decay = rememberSplineBasedDecay<Float>()
+    val state = remember {
+        AnchoredDraggableState(
+            initialValue = SwipeAnchor.Closed,
+            positionalThreshold = { totalDistance -> totalDistance * 0.5f },
+            velocityThreshold = { with(density) { 200.dp.toPx() } },
+            snapAnimationSpec = tween(durationMillis = 200),
+            decayAnimationSpec = decay
+        )
+    }
+    SideEffect {
+        state.updateAnchors(
+            DraggableAnchors {
+                SwipeAnchor.Closed at 0f
+                SwipeAnchor.Revealed at -actionWidthPx
+            }
+        )
+    }
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        // 底层：右侧红色「删除」按钮，露出后才能点到
+        Box(
+            modifier = Modifier
+                .matchParentSize()
+                .background(ExpiredRed, MaterialTheme.shapes.medium)
+        ) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .width(actionWidth)
+                    .fillMaxHeight()
+                    .clickable {
+                        scope.launch { state.animateTo(SwipeAnchor.Closed) }
+                        onRequestDelete()
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Text("删除", color = Color.White, style = MaterialTheme.typography.labelLarge)
+            }
+        }
+        // 上层：可左滑的内容卡片
+        Box(
+            modifier = Modifier
+                .offset {
+                    val x = state.offset
+                    IntOffset(if (x.isNaN()) 0 else x.roundToInt(), 0)
+                }
+                .anchoredDraggable(state, Orientation.Horizontal)
+        ) {
+            content()
+        }
+    }
+}
+
 @Composable
 private fun SwipeableTaskCard(
     item: TemplateWithInstance,
@@ -307,42 +431,7 @@ private fun SwipeableTaskCard(
     onRequestDelete: () -> Unit,
     onClick: () -> Unit
 ) {
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            when (value) {
-                // 右滑完成仅对未完成区有效；已完成区右滑不响应
-                SwipeToDismissBoxValue.StartToEnd -> {
-                    if (!completed) onComplete()
-                    false
-                }
-                // 左滑删除：只通知外部弹确认窗，不直接 dismiss
-                SwipeToDismissBoxValue.EndToStart -> { onRequestDelete(); false }
-                SwipeToDismissBoxValue.Settled -> false
-            }
-        }
-    )
-
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = !completed,
-        backgroundContent = {
-            val (bg, label) = when (dismissState.targetValue) {
-                SwipeToDismissBoxValue.StartToEnd -> CompletedGreen to "完成"
-                SwipeToDismissBoxValue.EndToStart -> ExpiredRed to "删除"
-                SwipeToDismissBoxValue.Settled -> Color.Transparent to ""
-            }
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(bg, MaterialTheme.shapes.medium)
-                    .padding(horizontal = 20.dp),
-                contentAlignment = if (dismissState.targetValue == SwipeToDismissBoxValue.StartToEnd)
-                    Alignment.CenterStart else Alignment.CenterEnd
-            ) {
-                Text(label, color = Color.White, style = MaterialTheme.typography.labelLarge)
-            }
-        }
-    ) {
+    SwipeRevealDeleteBox(onRequestDelete = onRequestDelete) {
         TaskCard(
             item = item,
             categoryColor = color,
@@ -353,7 +442,6 @@ private fun SwipeableTaskCard(
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun SwipeableExpiredCard(
     item: TemplateWithInstance,
@@ -362,35 +450,7 @@ private fun SwipeableExpiredCard(
     onRequestDelete: () -> Unit,
     onClick: () -> Unit
 ) {
-    val dismissState = rememberSwipeToDismissBoxState(
-        confirmValueChange = { value ->
-            // 仅左滑删除：只通知外部弹确认窗，不直接 dismiss；右滑不响应
-            if (value == SwipeToDismissBoxValue.EndToStart) onRequestDelete()
-            false
-        }
-    )
-
-    SwipeToDismissBox(
-        state = dismissState,
-        enableDismissFromStartToEnd = false,
-        backgroundContent = {
-            val deleting = dismissState.targetValue == SwipeToDismissBoxValue.EndToStart
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(
-                        if (deleting) ExpiredRed else Color.Transparent,
-                        MaterialTheme.shapes.medium
-                    )
-                    .padding(horizontal = 20.dp),
-                contentAlignment = Alignment.CenterEnd
-            ) {
-                if (deleting) {
-                    Text("删除", color = Color.White, style = MaterialTheme.typography.labelLarge)
-                }
-            }
-        }
-    ) {
+    SwipeRevealDeleteBox(onRequestDelete = onRequestDelete) {
         ExpiredTaskCard(item = item, color = color, onRevive = onRevive, onClick = onClick)
     }
 }
@@ -403,16 +463,34 @@ private fun ExpiredTaskCard(
     onRevive: () -> Unit,
     onClick: () -> Unit
 ) {
-    Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
+    Card(
+        onClick = onClick,
+        modifier = Modifier
+            .fillMaxWidth()
+            .shadow(
+                elevation = 4.dp,
+                shape = MaterialTheme.shapes.medium,
+                spotColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f),
+                ambientColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.28f)
+            ),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 0.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant)
+    ) {
         Row(
             modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .width(4.dp)
+                    .width(6.dp)
                     .height(40.dp)
-                    .background(color.copy(alpha = 0.45f), MaterialTheme.shapes.small)
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(color.copy(alpha = 0.45f), color.copy(alpha = 0.25f))
+                        ),
+                        RoundedCornerShape(topEnd = 6.dp, bottomEnd = 6.dp)
+                    )
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {

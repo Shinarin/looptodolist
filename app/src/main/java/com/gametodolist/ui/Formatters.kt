@@ -43,6 +43,19 @@ fun TaskTemplateEntity.recurrenceLabel(): String =
         RecurrenceType.MONTHLY -> "每月 ${monthDay} 日"
     }
 
+/** 剩余天数：长期有效/尚未开始返回 null；已截止返回负数 */
+fun remainingDays(
+    windowStart: Long,
+    windowEnd: Long,
+    referenceMillis: Long = System.currentTimeMillis()
+): Long? {
+    if (windowEnd == Long.MAX_VALUE) return null
+    if (windowStart > referenceMillis) return null
+    val refDay = Instant.ofEpochMilli(referenceMillis).atZone(zone).toLocalDate()
+    val endDay = Instant.ofEpochMilli(windowEnd).atZone(zone).toLocalDate()
+    return ChronoUnit.DAYS.between(refDay, endDay)
+}
+
 /** 剩余时间展示文案；referenceMillis 为比较基准（默认现在，日历传所选日期） */
 fun remainingLabel(
     windowStart: Long,

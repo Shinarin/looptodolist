@@ -1,5 +1,9 @@
 # 更新日志（CHANGELOG）
 
+## [Unreleased]
+
+- **修复列表滑动起步卡顿（高刷新率适配）**：荣耀 GT Pro 实测，MagicOS 智能刷新率对第三方应用默认按 60Hz 渲染（dumpsys 可见 `render: (0.0 60.0)` 封顶），触摸后才升档，每次起步滑动前 150~250ms 帧间隔 16.6~36ms（60Hz + 模式切换抖动），表现为「每次滑起来先卡一下」。现在 `MainActivity` 与 `WidgetCropActivity` 在 `onCreate` 调 `pinHighRefreshMode()`（`ui/HighRefreshMode.kt`）——以 `preferredDisplayModeId` 给窗口钉住最接近 120Hz 的显示模式（90Hz 起步挑档、不拉满 144Hz），渲染封顶解除（`(0.0 Infinity)`），滑动起步即 8.3ms 帧（修复前 16.6~36ms），混合滚动掉帧 0.4~1.4%。
+
 ## [1.0.1] — 2026-08-18
 
 ### 交互修正与复活修复（荣耀 GT Pro 实测）

@@ -140,6 +140,7 @@ suspend fun settleAndRefresh() {
 - **分类管理** `category/`：增删改 + 色板（FlowRow 横纵都留间距），删除有确认。
 - **设置页** `settings/`：小组件外观（纯色透明度 / 壁纸变暗度 / 更换壁纸）+ 精确闹钟授权状态（可跳系统设置）。**更换壁纸与组件头部图片按钮统一走中转页 `WidgetWallpaperPickActivity`**：系统选图 → `WallpaperImporter.saveToPending`（按屏幕长边封顶 1440..3200px、JPEG q92、先读边界按 2 的幂采样防 OOM）→ 直接进裁剪页（挂起模式），保存才生效、取消则旧壁纸原样保留（暂存式提交，见小组件节第 8 条）；返回本页时 ON_RESUME 重读落盘状态刷新预览（`refreshWallpaperState`）。滑块拖动中只落盘（`persist`），松手才刷新组件，避免拖动期间狂刷 RemoteViews。壁纸"效果预览"为页面宽 60% 的居中 1:1 方形，对裁剪区域（无则用原图）做居中最大裁剪，不固定比例拉伸。
 - `Formatters.kt`：日期/循环规则/剩余时间文案（"今日截止 / 剩 N 天 / 长期有效"等），UI 与小组件共用。
+- `HighRefreshMode.kt`：`Activity.pinHighRefreshMode()`——以 `preferredDisplayModeId` 给窗口钉最接近 120Hz 的显示模式（90Hz 起步挑档），解除荣耀/MagicOS 智能刷新率对第三方应用的 60Hz 渲染封顶与滑动起步的 60→120 爬升卡顿（实测修复后起步即 8.3ms 帧）。`MainActivity` 与 `WidgetCropActivity` 的 `onCreate` 都已调用；**新增独立 Activity 必须同样调用**。
 
 ViewModel 统一模式：写操作包 `try/catch` 转成 `errorMessage` StateFlow，UI 弹 Snackbar 后 `consumeError()`。
 

@@ -82,4 +82,5 @@ app/src/main/java/com/gametodolist/
 - 改动任务状态/模板/分类后，统一走 `DataSyncManager.settleAndRefresh()`（不要手工组合 rollover/重排提醒/刷新组件，防漏步）；仅外观设置改动仍调 `WidgetUpdater.refresh(context)`。
 - 主题色不要硬编码：主色系一律走 `colorScheme` 或 `LocalThemePreset`（卡片描边 = `outlineVariant`，FAB 渐变尾色 = `preset.gradientEnd`），新预设加进 `THEME_PRESETS` 即可在设置页被选中；剩余天数的紧急态判定用 `Formatters.remainingDays()`（<=2 天橙、已截止红）。
 - 新语义靠纯函数 + JVM 单测落地（引擎、结算、裁剪），数据完整性靠 Robolectric 集成测试，UI 冒烟在 Pixel_6 模拟器上逐条截图验证。
+- 高刷新率适配：每个独立窗口（`MainActivity`、`WidgetCropActivity`）在 `onCreate` 调 `pinHighRefreshMode()`（`ui/HighRefreshMode.kt`）——`preferredDisplayModeId` 钉最接近 120Hz 的模式，解除荣耀/MagicOS 智能刷新率对第三方应用的 60Hz 渲染封顶（否则每次滑动起步有 60→120 爬升卡顿）；新增 Activity 时同样要调。
 - 已完成任务不消失：划线归到已完成区，点实心勾撤销；组件上整行点击即完成/取消。已作废任务归已作废区，可点击编辑（保存即复活）、左滑删除、"重新开启"（一次性任务从今天开始重算窗口，循环任务回到当前循环）。

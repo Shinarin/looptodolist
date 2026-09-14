@@ -197,9 +197,10 @@ fun TaskEditScreen(
                     onPicked = { d -> viewModel.update { it.copy(anchorDate = d) } }
                 )
                 RecurrenceType.INTERVAL_DAYS -> {
-                    NumberField(
+                    OptionalNumberField(
                         label = "间隔天数",
                         value = state.intervalDays,
+                        placeholderValue = 1,
                         onValueChange = { v -> viewModel.update { it.copy(intervalDays = v) } }
                     )
                     DateField(
@@ -354,6 +355,28 @@ private fun NumberField(label: String, value: Int, onValueChange: (Int) -> Unit)
             s.filter { it.isDigit() }.toIntOrNull()?.let { onValueChange(it.coerceAtLeast(1)) }
         },
         label = { Text(label) },
+        singleLine = true,
+        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+        modifier = Modifier.fillMaxWidth()
+    )
+}
+
+/** 可留空的数字输入框：空值时显示虚化占位数字（不占位），输入即替换，留空 = null（由保存方兜底默认值） */
+@Composable
+private fun OptionalNumberField(
+    label: String,
+    value: Int?,
+    placeholderValue: Int,
+    onValueChange: (Int?) -> Unit
+) {
+    OutlinedTextField(
+        value = value?.toString() ?: "",
+        onValueChange = { s ->
+            val digits = s.filter { it.isDigit() }
+            onValueChange(digits.toIntOrNull()?.coerceAtLeast(1))
+        },
+        label = { Text(label) },
+        placeholder = { Text(placeholderValue.toString()) },
         singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
         modifier = Modifier.fillMaxWidth()

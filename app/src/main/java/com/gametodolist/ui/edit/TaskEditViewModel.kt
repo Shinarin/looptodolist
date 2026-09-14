@@ -30,7 +30,8 @@ data class TaskEditUiState(
     val note: String = "",
     val categoryId: Long? = null,
     val recurrenceType: RecurrenceType = RecurrenceType.NONE,
-    val intervalDays: Int = 1,
+    /** INTERVAL_DAYS：间隔天数；null = 输入框为空（显示虚化占位 1，保存时按 1 存） */
+    val intervalDays: Int? = null,
     val weekdaysMask: Int = 0,
     val monthDay: Int = 1,
     /** WEEKLY/MONTHLY：是否指定开始日期（未指定 = 立即开始，存 anchorDate=0） */
@@ -130,7 +131,7 @@ class TaskEditViewModel @Inject constructor(
                     title = s.title.trim(),
                     note = s.note.trim(),
                     recurrenceType = s.recurrenceType.name,
-                    intervalDays = s.intervalDays.coerceAtLeast(1),
+                    intervalDays = (s.intervalDays ?: 1).coerceAtLeast(1),
                     weekdaysMask = s.weekdaysMask,
                     monthDay = s.monthDay.coerceIn(1, 31),
                     anchorDate = when (s.recurrenceType) {

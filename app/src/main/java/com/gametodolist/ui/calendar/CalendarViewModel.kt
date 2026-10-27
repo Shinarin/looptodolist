@@ -10,6 +10,8 @@ import com.gametodolist.data.entity.TaskInstanceEntity
 import com.gametodolist.data.entity.TaskTemplateEntity
 import com.gametodolist.domain.InstanceStatus
 import com.gametodolist.domain.RecurrenceEngine
+import com.gametodolist.domain.RecurrenceType
+import com.gametodolist.domain.toRecurrenceType
 import com.gametodolist.sync.DataSyncManager
 import com.gametodolist.ui.toEpochMillis
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -58,10 +60,11 @@ class CalendarViewModel @Inject constructor(
 
     /** 当月「更新日」打点：日期 → 当天更新的清单的分类 id 列表 */
     val monthRenewals: StateFlow<Map<LocalDate, List<Long?>>> =
-        combine(_month, templates) { ym, list ->
+        combine(_month, templates, latestInstances) { ym, list, latest ->
+            val latestByTemplate = latest.associateBy { it.templateId }
             val result = mutableMapOf<LocalDate, MutableList<Long?>>()
             list.forEach { t ->
-                renewalDatesInMonth(ym, t).forEach { d ->
+                renewalDatesInMonth(ym, t, latestByTemplate[t.id]).forEach { d ->
                     result.getOrPut(d) { mutableListOf() }.add(t.categoryId)
                 }
             }
@@ -79,6 +82,25 @@ class CalendarViewModel @Inject constructor(
             val dayStart = date.toEpochMillis()
             list.mapNotNull { t ->
                 runCatching {
+                    // 完成后计时·冷却中：只在恢复日当天出现（预演为待办 + 更新日），其余日期不出现；
+                    // 等待完成期间走通用引擎分支（长期有效，从开始日起每天可见）
+                    if (t.recurrenceType.toRecurrenceType() == RecurrenceType.AFTER_COMPLETION) {
+                        val cooling = latestByTemplate[t.id]?.takeIf {
+                            it.status == InstanceStatus.COMPLETED.name && it.windowEnd != Long.MAX_VALUE
+                        }
+                        if (cooling != null) {
+                            val restoreDay = Instant.ofEpochMilli(cooling.windowEnd)
+                                .atZone(zone).toLocalDate()
+                            if (date != restoreDay) return@runCatching null
+                            return@runCatching CalendarDayItem(
+                                item = TemplateWithInstance(t, null),
+                                windowStart = cooling.windowEnd,
+                                windowEnd = Long.MAX_VALUE,
+                                status = InstanceStatus.ACTIVE.name,
+                                isRenewal = true
+                            )
+                        }
+                    }
                     val cycle = RecurrenceEngine.currentCycleStartDate(date, t, zone)
                     val window = RecurrenceEngine.computeWindow(cycle, t, zone)
                     if (dayStart < window.startMillis || dayStart >= window.endMillis) return@runCatching null
@@ -103,11 +125,28 @@ class CalendarViewModel @Inject constructor(
         viewModelScope.launch { dataSync.settleAndRefresh() }
     }
 
-    /** 模板在当月内的所有循环起点（更新日）；不循环的取开始日期 */
-    private fun renewalDatesInMonth(ym: YearMonth, t: TaskTemplateEntity): List<LocalDate> =
+    /** 模板在当月内的所有循环起点（更新日）；不循环的取开始日期；
+     *  完成后计时打开始日 + （冷却中的）恢复日，不按间隔推算未来 */
+    private fun renewalDatesInMonth(
+        ym: YearMonth,
+        t: TaskTemplateEntity,
+        latest: TaskInstanceEntity?
+    ): List<LocalDate> =
         runCatching {
             val monthStart = ym.atDay(1)
             val monthEnd = ym.atEndOfMonth()
+            if (t.recurrenceType.toRecurrenceType() == RecurrenceType.AFTER_COMPLETION) {
+                val dates = mutableListOf<LocalDate>()
+                val anchor = RecurrenceEngine.currentCycleStartDate(monthStart, t, zone)
+                if (anchor in monthStart..monthEnd) dates.add(anchor)
+                if (latest != null && latest.status == InstanceStatus.COMPLETED.name &&
+                    latest.windowEnd != Long.MAX_VALUE
+                ) {
+                    val restoreDay = Instant.ofEpochMilli(latest.windowEnd).atZone(zone).toLocalDate()
+                    if (restoreDay in monthStart..monthEnd && restoreDay != anchor) dates.add(restoreDay)
+                }
+                return@runCatching dates
+            }
             val result = mutableListOf<LocalDate>()
             var cycle = RecurrenceEngine.currentCycleStartDate(monthStart, t, zone)
             var guard = 0

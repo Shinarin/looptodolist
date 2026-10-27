@@ -16,6 +16,8 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import java.time.LocalDate
+import java.time.ZoneId
 
 /** 真实 Room（in-memory）集成测试：验证外键级联下的数据完整性 */
 @RunWith(RobolectricTestRunner::class)
@@ -71,5 +73,44 @@ class RoomIntegrationTest {
         templateDao.deleteById(id)
 
         assertEquals(null, instanceDao.getLatestForTemplate(id))
+    }
+
+    @Test
+    fun `完成后计时 完成与撤销改写冷却窗口终点`() = runTest {
+        val templateDao = db.taskTemplateDao()
+        val instanceDao = db.taskInstanceDao()
+        val repository = TodoRepository(
+            db.categoryDao(),
+            templateDao,
+            instanceDao,
+            RolloverManager(templateDao, instanceDao)
+        )
+        val id = templateDao.insert(
+            TaskTemplateEntity(
+                categoryId = null, title = "月卡",
+                recurrenceType = "AFTER_COMPLETION", intervalDays = 30
+            )
+        )
+        val instId = instanceDao.insert(
+            TaskInstanceEntity(
+                templateId = id, cycleStart = 1000, windowStart = 1000, windowEnd = Long.MAX_VALUE
+            )
+        )
+
+        // 完成：窗口终点改写为「今天 + 30 天」的本地零点，completedAt 写入
+        repository.completeInstance(instId)
+        val completed = instanceDao.getById(instId)!!
+        assertEquals("COMPLETED", completed.status)
+        val expectedEnd = LocalDate.now().plusDays(30)
+            .atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        assertEquals(expectedEnd, completed.windowEnd)
+        assertNotNull(completed.completedAt)
+
+        // 撤销完成：窗口终点恢复长期有效，completedAt 清空（冷却取消）
+        repository.uncompleteInstance(instId)
+        val restored = instanceDao.getById(instId)!!
+        assertEquals("ACTIVE", restored.status)
+        assertEquals(Long.MAX_VALUE, restored.windowEnd)
+        assertEquals(null, restored.completedAt)
     }
 }

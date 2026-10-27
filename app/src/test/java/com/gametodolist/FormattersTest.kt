@@ -1,5 +1,6 @@
 package com.gametodolist
 
+import com.gametodolist.ui.cooldownLabel
 import com.gametodolist.ui.remainingDays
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
@@ -36,5 +37,15 @@ class FormattersTest {
     @Test
     fun `已截止返回负数`() {
         assertEquals(-1L, remainingDays(today.dayMillis(), today.minusDays(1).dayMillis()))
+    }
+
+    @Test
+    fun `冷却恢复倒计时文案`() {
+        assertNull(cooldownLabel(Long.MAX_VALUE))
+        assertEquals("今日恢复", cooldownLabel(today.dayMillis()))
+        assertEquals("明日恢复", cooldownLabel(today.plusDays(1).dayMillis()))
+        assertEquals("剩 5 天恢复", cooldownLabel(today.plusDays(5).dayMillis()))
+        // 恢复日已过（结算尚未跑）也按「今日恢复」显示
+        assertEquals("今日恢复", cooldownLabel(today.minusDays(1).dayMillis()))
     }
 }

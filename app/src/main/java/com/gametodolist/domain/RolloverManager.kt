@@ -78,6 +78,26 @@ class RolloverManager @Inject constructor(
         var latest: TaskInstanceEntity = instanceDao.getLatestForTemplate(template.id)
             ?: insertInstance(template, RecurrenceEngine.currentCycleStartDate(today, template, zone), zone)
 
+        if (template.recurrenceType.toRecurrenceType() == RecurrenceType.AFTER_COMPLETION) {
+            // 完成后计时：未完成实例窗口恒为长期有效（不过期）；冷却到期（恢复日零点已过）
+            // 时以「完成日期 + 间隔天数」为新循环起点生成新未完成实例，旧实例保留为已完成历史
+            var guard = 0
+            while (latest.status == InstanceStatus.COMPLETED.name &&
+                latest.windowEnd != Long.MAX_VALUE &&
+                latest.windowEnd <= nowMillis &&
+                guard++ < MAX_CATCH_UP_CYCLES
+            ) {
+                val nextCycle = latest.completedAt?.let {
+                    RecurrenceEngine.cooldownEndDate(
+                        Instant.ofEpochMilli(it).atZone(zone).toLocalDate(), template
+                    )
+                } // 无完成时间（历史数据/类型切换）：退化为按冷却窗口终点当天恢复
+                    ?: Instant.ofEpochMilli(latest.windowEnd).atZone(zone).toLocalDate()
+                latest = insertInstance(template, nextCycle, zone)
+            }
+            return
+        }
+
         // 窗口已过：作废（若未完成）并逐循环补齐，直到当前窗口有效
         var guard = 0
         while (latest.windowEnd <= nowMillis && guard++ < MAX_CATCH_UP_CYCLES) {
@@ -105,7 +125,8 @@ class RolloverManager @Inject constructor(
         if (latest != null && latest.status == InstanceStatus.ACTIVE.name) {
             val expected = RecurrenceEngine.currentCycleStartDate(today, template, zone)
             val latestCycle = Instant.ofEpochMilli(latest.cycleStart).atZone(zone).toLocalDate()
-            if (template.recurrenceType.toRecurrenceType() != RecurrenceType.NONE && latestCycle != expected) {
+            val type = template.recurrenceType.toRecurrenceType()
+            if (type != RecurrenceType.NONE && type != RecurrenceType.AFTER_COMPLETION && latestCycle != expected) {
                 val expectedStart = expected.atStartOfDay(zone).toInstant().toEpochMilli()
                 val existing = instanceDao.findByCycle(template.id, expectedStart)
                 when {
@@ -161,6 +182,20 @@ class RolloverManager @Inject constructor(
                 // 窗口改完可能整体过期（如开始日期改到过去）：立即作废
                 instanceDao.getById(latest.id)?.let { expireIfPastDue(it, nowMillis) }
             }
+        }
+        // 完成后计时：编辑保存（含从其他类型切入）时，进行中的冷却按新间隔天数
+        // 以原完成日期重算恢复日；无完成时间则以保存当下为锚。恢复日已过由下方结算立即恢复
+        val current = instanceDao.getLatestForTemplate(template.id)
+        if (template.recurrenceType.toRecurrenceType() == RecurrenceType.AFTER_COMPLETION &&
+            current != null && current.status == InstanceStatus.COMPLETED.name
+        ) {
+            val completedAt = current.completedAt ?: nowMillis
+            instanceDao.update(
+                current.copy(
+                    completedAt = completedAt,
+                    windowEnd = RecurrenceEngine.cooldownWindowEndMillis(completedAt, template, zone)
+                )
+            )
         }
         rolloverTemplateLocked(template, nowMillis, zone)
     }

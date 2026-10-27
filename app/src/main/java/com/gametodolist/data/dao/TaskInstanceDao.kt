@@ -45,6 +45,14 @@ interface TaskInstanceDao {
     @Query("UPDATE task_instances SET status = 'COMPLETED', completedAt = :completedAt WHERE id = :id")
     suspend fun markCompleted(id: Long, completedAt: Long)
 
+    /** 完成后计时：完成的同时把窗口终点改写为冷却恢复日（零点毫秒） */
+    @Query("UPDATE task_instances SET status = 'COMPLETED', completedAt = :completedAt, windowEnd = :windowEnd WHERE id = :id")
+    suspend fun markCompletedWithWindowEnd(id: Long, completedAt: Long, windowEnd: Long)
+
+    /** 完成后计时：撤销完成同时把窗口终点改回长期有效（取消冷却） */
+    @Query("UPDATE task_instances SET status = 'ACTIVE', completedAt = NULL, windowEnd = :windowEnd WHERE id = :id")
+    suspend fun markActiveWithWindowEnd(id: Long, windowEnd: Long)
+
     @Query("UPDATE task_instances SET status = 'EXPIRED' WHERE id = :id")
     suspend fun markExpired(id: Long)
 }

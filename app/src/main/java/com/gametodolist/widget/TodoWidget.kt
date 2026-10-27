@@ -51,7 +51,10 @@ import com.gametodolist.data.CategoryGroup
 import com.gametodolist.data.HomeData
 import com.gametodolist.data.TemplateWithInstance
 import com.gametodolist.domain.WallpaperCrop
+import com.gametodolist.domain.RecurrenceType
+import com.gametodolist.domain.toRecurrenceType
 import com.gametodolist.ui.MainActivity
+import com.gametodolist.ui.cooldownLabel
 import com.gametodolist.ui.remainingLabel
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
@@ -507,6 +510,18 @@ private fun TaskRow(
                     ),
                     maxLines = 1
                 )
+            }
+            // 完成后计时·冷却中：已完成行显示恢复倒计时
+            if (completed && instance != null &&
+                item.template.recurrenceType.toRecurrenceType() == RecurrenceType.AFTER_COMPLETION
+            ) {
+                cooldownLabel(instance.windowEnd)?.let {
+                    Text(
+                        it,
+                        style = TextStyle(color = ColorProvider(style.textSecondary), fontSize = 11.sp),
+                        maxLines = 1
+                    )
+                }
             }
         }
     }

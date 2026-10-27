@@ -35,6 +35,8 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.gametodolist.data.TemplateWithInstance
 import com.gametodolist.domain.RecurrenceType
+import com.gametodolist.domain.toRecurrenceType
+import com.gametodolist.ui.cooldownLabel
 import com.gametodolist.ui.recurrenceLabel
 import com.gametodolist.ui.remainingDays
 import com.gametodolist.ui.remainingLabel
@@ -158,11 +160,15 @@ fun TaskCard(
                     }
                 }
 
-                // 右侧：剩余天数胶囊（<=2 天橙、已截止红、其余分类色）；已完成显示绿色「已完成」
+                // 右侧：剩余天数胶囊（<=2 天橙、已截止红、其余分类色）；已完成显示绿色「已完成」；
+                // 完成后计时的冷却中实例改显恢复倒计时
                 if (instance != null) {
                     Spacer(Modifier.width(10.dp))
                     if (completed) {
-                        RemainingChip("已完成", CompletedGreen)
+                        val cooling = if (template.recurrenceType.toRecurrenceType() ==
+                            RecurrenceType.AFTER_COMPLETION
+                        ) cooldownLabel(instance.windowEnd) else null
+                        RemainingChip(cooling ?: "已完成", CompletedGreen)
                     } else {
                         val (fg, bg) = remainingChipColors(
                             remainingDays(instance.windowStart, instance.windowEnd),

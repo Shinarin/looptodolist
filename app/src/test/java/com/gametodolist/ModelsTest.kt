@@ -11,6 +11,7 @@ class ModelsTest {
     @Test
     fun `合法与非法循环类型解析`() {
         assertEquals(RecurrenceType.WEEKLY, "WEEKLY".toRecurrenceType())
+        assertEquals(RecurrenceType.AFTER_COMPLETION, "AFTER_COMPLETION".toRecurrenceType())
         assertEquals(RecurrenceType.NONE, "garbage".toRecurrenceType())
         assertEquals(RecurrenceType.NONE, null.toRecurrenceType())
     }

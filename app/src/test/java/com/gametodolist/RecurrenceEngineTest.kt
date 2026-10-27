@@ -237,4 +237,46 @@ class RecurrenceEngineTest {
         assertEquals(LocalDate.of(2025, 3, 8), startDate)
         assertEquals(LocalDate.of(2025, 3, 10), endDate)
     }
+
+    // ---------- AFTER_COMPLETION（完成后计时） ----------
+
+    @Test
+    fun `完成后计时 窗口恒为长期有效`() {
+        val t = template("AFTER_COMPLETION", intervalDays = 30)
+        val w = RecurrenceEngine.computeWindow(monday, t, zone)
+        assertEquals(millisOf(monday), w.startMillis)
+        assertEquals(Long.MAX_VALUE, w.endMillis)
+        // 即使模板上残留 CUSTOM 设置也一律忽略
+        val custom = template("AFTER_COMPLETION", intervalDays = 30, windowMode = "CUSTOM", customWindowDays = 5)
+        assertEquals(Long.MAX_VALUE, RecurrenceEngine.computeWindow(monday, custom, zone).endMillis)
+    }
+
+    @Test
+    fun `完成后计时 等待完成期间循环起点锚在开始日期`() {
+        val t = template("AFTER_COMPLETION", intervalDays = 30)
+        assertEquals(
+            LocalDate.of(2025, 1, 1),
+            RecurrenceEngine.currentCycleStartDate(LocalDate.of(2025, 6, 1), t, zone)
+        )
+    }
+
+    @Test
+    fun `完成后计时 冷却恢复日 = 完成日期 + 间隔天数`() {
+        val t = template("AFTER_COMPLETION", intervalDays = 30)
+        assertEquals(LocalDate.of(2025, 2, 9), RecurrenceEngine.cooldownEndDate(LocalDate.of(2025, 1, 10), t))
+        // 间隔天数兜底最小 1
+        val zero = template("AFTER_COMPLETION", intervalDays = 0)
+        assertEquals(LocalDate.of(2025, 1, 11), RecurrenceEngine.cooldownEndDate(LocalDate.of(2025, 1, 10), zero))
+    }
+
+    @Test
+    fun `完成后计时 冷却窗口终点为恢复日零点`() {
+        // 日粒度：1-10 23:59 完成、间隔 3 天 → 恢复日 1-13 零点
+        val t = template("AFTER_COMPLETION", intervalDays = 3)
+        val completedAt = millisOf(LocalDate.of(2025, 1, 10), hour = 23, minute = 59)
+        assertEquals(
+            millisOf(LocalDate.of(2025, 1, 13)),
+            RecurrenceEngine.cooldownWindowEndMillis(completedAt, t, zone)
+        )
+    }
 }

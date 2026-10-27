@@ -178,15 +178,46 @@ fun TaskEditScreen(
 
             // ---- 循环规则 ----
             SectionTitle("循环")
+            // 一级：不循环 / 循环 / 完成后计时；选「循环」再展开二级子类型
+            val topLevel = when (state.recurrenceType) {
+                RecurrenceType.NONE -> 0
+                RecurrenceType.AFTER_COMPLETION -> 2
+                else -> 1
+            }
             SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                val types = RecurrenceType.entries
-                val labels = listOf("不循环", "每 N 天", "每周", "每月")
-                types.forEachIndexed { index, type ->
+                listOf("不循环", "循环", "完成后计时").forEachIndexed { index, label ->
                     SegmentedButton(
-                        selected = state.recurrenceType == type,
-                        onClick = { viewModel.update { it.copy(recurrenceType = type) } },
-                        shape = SegmentedButtonDefaults.itemShape(index, types.size)
-                    ) { Text(labels[index]) }
+                        selected = topLevel == index,
+                        onClick = {
+                            viewModel.update {
+                                it.copy(
+                                    recurrenceType = when (index) {
+                                        0 -> RecurrenceType.NONE
+                                        2 -> RecurrenceType.AFTER_COMPLETION
+                                        // 从其他一级类型切入「循环」时默认每 N 天；已是循环子类型则保持
+                                        else -> if (topLevel == 1) it.recurrenceType
+                                        else RecurrenceType.INTERVAL_DAYS
+                                    }
+                                )
+                            }
+                        },
+                        shape = SegmentedButtonDefaults.itemShape(index, 3)
+                    ) { Text(label) }
+                }
+            }
+            if (topLevel == 1) {
+                val subTypes = listOf(
+                    RecurrenceType.INTERVAL_DAYS, RecurrenceType.WEEKLY, RecurrenceType.MONTHLY
+                )
+                val subLabels = listOf("每 N 天", "每周", "每月")
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    subTypes.forEachIndexed { index, type ->
+                        SegmentedButton(
+                            selected = state.recurrenceType == type,
+                            onClick = { viewModel.update { it.copy(recurrenceType = type) } },
+                            shape = SegmentedButtonDefaults.itemShape(index, subTypes.size)
+                        ) { Text(subLabels[index]) }
+                    }
                 }
             }
 
@@ -232,35 +263,50 @@ fun TaskEditScreen(
                     )
                     AnchorDateSection(state, viewModel)
                 }
+                RecurrenceType.AFTER_COMPLETION -> {
+                    OptionalNumberField(
+                        label = "完成后间隔天数（到期自动恢复未完成）",
+                        value = state.intervalDays,
+                        placeholderValue = 1,
+                        onValueChange = { v -> viewModel.update { it.copy(intervalDays = v) } }
+                    )
+                    DateField(
+                        label = "开始日期",
+                        dateMillis = state.anchorDate,
+                        onPicked = { d -> viewModel.update { it.copy(anchorDate = d) } }
+                    )
+                }
             }
 
-            // ---- 显示时段 ----
-            SectionTitle("显示时段")
-            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
-                val fullLabel = if (state.recurrenceType == RecurrenceType.NONE) "长期有效" else "整个循环"
-                SegmentedButton(
-                    selected = state.windowMode == WindowMode.FULL_CYCLE,
-                    onClick = { viewModel.update { it.copy(windowMode = WindowMode.FULL_CYCLE) } },
-                    shape = SegmentedButtonDefaults.itemShape(0, 2)
-                ) { Text(fullLabel) }
-                SegmentedButton(
-                    selected = state.windowMode == WindowMode.CUSTOM,
-                    onClick = { viewModel.update { it.copy(windowMode = WindowMode.CUSTOM) } },
-                    shape = SegmentedButtonDefaults.itemShape(1, 2)
-                ) { Text("自定义") }
-            }
+            // ---- 显示时段 ----（完成后计时一律长期有效，不暴露该选项）
+            if (state.recurrenceType != RecurrenceType.AFTER_COMPLETION) {
+                SectionTitle("显示时段")
+                SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                    val fullLabel = if (state.recurrenceType == RecurrenceType.NONE) "长期有效" else "整个循环"
+                    SegmentedButton(
+                        selected = state.windowMode == WindowMode.FULL_CYCLE,
+                        onClick = { viewModel.update { it.copy(windowMode = WindowMode.FULL_CYCLE) } },
+                        shape = SegmentedButtonDefaults.itemShape(0, 2)
+                    ) { Text(fullLabel) }
+                    SegmentedButton(
+                        selected = state.windowMode == WindowMode.CUSTOM,
+                        onClick = { viewModel.update { it.copy(windowMode = WindowMode.CUSTOM) } },
+                        shape = SegmentedButtonDefaults.itemShape(1, 2)
+                    ) { Text("自定义") }
+                }
 
-            if (state.windowMode == WindowMode.CUSTOM) {
-                NumberField(
-                    label = if (state.recurrenceType == RecurrenceType.NONE)
-                        "持续天数（≥1，从开始日期起算）"
-                    else
-                        "显示天数（≥1，从每次循环开始日起算）",
-                    value = state.customWindowDays,
-                    onValueChange = { v ->
-                        viewModel.update { it.copy(customWindowDays = v.coerceAtLeast(1)) }
-                    }
-                )
+                if (state.windowMode == WindowMode.CUSTOM) {
+                    NumberField(
+                        label = if (state.recurrenceType == RecurrenceType.NONE)
+                            "持续天数（≥1，从开始日期起算）"
+                        else
+                            "显示天数（≥1，从每次循环开始日起算）",
+                        value = state.customWindowDays,
+                        onValueChange = { v ->
+                            viewModel.update { it.copy(customWindowDays = v.coerceAtLeast(1)) }
+                        }
+                    )
+                }
             }
 
             // ---- 提醒 ----
@@ -272,7 +318,10 @@ fun TaskEditScreen(
                     Column(modifier = Modifier.weight(1f)) {
                         Text("到期提醒", style = MaterialTheme.typography.titleSmall)
                         Text(
-                            "截止前 ${reminderLabel(state.reminderMinutesBefore)} 通知",
+                            if (state.recurrenceType == RecurrenceType.AFTER_COMPLETION)
+                                "恢复当天 09:00 通知"
+                            else
+                                "截止前 ${reminderLabel(state.reminderMinutesBefore)} 通知",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -282,7 +331,8 @@ fun TaskEditScreen(
                         onCheckedChange = { v -> viewModel.update { it.copy(reminderEnabled = v) } }
                     )
                 }
-                if (state.reminderEnabled) {
+                // 完成后计时无截止时间，固定恢复日 09:00 提醒，不提供提前量预设
+                if (state.reminderEnabled && state.recurrenceType != RecurrenceType.AFTER_COMPLETION) {
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         listOf(15, 30, 60, 180, 1440).forEach { m ->
                             FilterChip(

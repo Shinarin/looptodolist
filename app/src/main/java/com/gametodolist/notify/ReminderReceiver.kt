@@ -25,6 +25,7 @@ class ReminderReceiver : BroadcastReceiver() {
         val instanceId = intent.getLongExtra(EXTRA_INSTANCE_ID, -1L)
         if (instanceId == -1L) return
         val title = intent.getStringExtra(EXTRA_TITLE).orEmpty()
+        val body = intent.getStringExtra(EXTRA_BODY)?.takeIf { it.isNotBlank() } ?: DEFAULT_BODY
 
         val pendingResult = goAsync()
         CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
@@ -36,7 +37,7 @@ class ReminderReceiver : BroadcastReceiver() {
                     entryPoint.reminderScheduler().cancel(instanceId)
                     return@launch
                 }
-                showNotification(context, instanceId, title)
+                showNotification(context, instanceId, title, body)
             } catch (e: Exception) {
                 android.util.Log.w("ReminderReceiver", "check instance failed", e)
             } finally {
@@ -45,7 +46,7 @@ class ReminderReceiver : BroadcastReceiver() {
         }
     }
 
-    private fun showNotification(context: Context, instanceId: Long, title: String) {
+    private fun showNotification(context: Context, instanceId: Long, title: String, body: String) {
         if (android.os.Build.VERSION.SDK_INT >= 33 &&
             ContextCompat.checkSelfPermission(context, Manifest.permission.POST_NOTIFICATIONS)
             != PackageManager.PERMISSION_GRANTED
@@ -62,7 +63,7 @@ class ReminderReceiver : BroadcastReceiver() {
         val notification = NotificationCompat.Builder(context, GameTodoApp.REMINDER_CHANNEL_ID)
             .setSmallIcon(R.drawable.ic_launcher_foreground)
             .setContentTitle(title)
-            .setContentText("任务即将截止，记得完成哦")
+            .setContentText(body)
             .setAutoCancel(true)
             .setContentIntent(openApp)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -74,5 +75,7 @@ class ReminderReceiver : BroadcastReceiver() {
     companion object {
         const val EXTRA_INSTANCE_ID = "extra_instance_id"
         const val EXTRA_TITLE = "extra_title"
+        const val EXTRA_BODY = "extra_body"
+        const val DEFAULT_BODY = "任务即将截止，记得完成哦"
     }
 }

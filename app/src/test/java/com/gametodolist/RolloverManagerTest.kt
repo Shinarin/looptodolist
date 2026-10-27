@@ -64,6 +64,16 @@ private class FakeInstanceDao(val instances: MutableList<TaskInstanceEntity> = m
     override suspend fun markCompleted(id: Long, completedAt: Long) {
         instances.replaceAll { if (it.id == id) it.copy(status = "COMPLETED", completedAt = completedAt) else it }
     }
+    override suspend fun markCompletedWithWindowEnd(id: Long, completedAt: Long, windowEnd: Long) {
+        instances.replaceAll {
+            if (it.id == id) it.copy(status = "COMPLETED", completedAt = completedAt, windowEnd = windowEnd) else it
+        }
+    }
+    override suspend fun markActiveWithWindowEnd(id: Long, windowEnd: Long) {
+        instances.replaceAll {
+            if (it.id == id) it.copy(status = "ACTIVE", completedAt = null, windowEnd = windowEnd) else it
+        }
+    }
     override suspend fun markExpired(id: Long) {
         instances.replaceAll { if (it.id == id) it.copy(status = "EXPIRED") else it }
     }
@@ -472,5 +482,164 @@ class RolloverManagerTest {
         assertEquals(InstanceStatus.ACTIVE.name, revived.status)
         assertEquals(millisOf(LocalDate.of(2025, 1, 14)), revived.windowStart)
         assertEquals(millisOf(LocalDate.of(2025, 1, 17)), revived.windowEnd)
+    }
+
+    // ---------- 完成后计时（AFTER_COMPLETION） ----------
+
+    private fun cooldownTemplate(
+        id: Long = 1L,
+        intervalDays: Int = 3,
+        createdAt: Long = millisOf(LocalDate.of(2025, 1, 1))
+    ) = TaskTemplateEntity(
+        id = id,
+        categoryId = null,
+        title = "月卡",
+        recurrenceType = "AFTER_COMPLETION",
+        intervalDays = intervalDays,
+        createdAt = createdAt
+    )
+
+    @Test
+    fun `完成后计时 无实例时创建长期有效的未完成实例`() = runTest {
+        val instances = FakeInstanceDao()
+        val m = manager(mutableListOf(cooldownTemplate()), instances)
+
+        m.rolloverAll(millisOf(LocalDate.of(2025, 1, 10), 10), zone)
+
+        assertEquals(1, instances.instances.size)
+        val inst = instances.instances[0]
+        assertEquals(InstanceStatus.ACTIVE.name, inst.status)
+        assertEquals(Long.MAX_VALUE, inst.windowEnd)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 1)), inst.cycleStart) // 锚在创建日
+    }
+
+    @Test
+    fun `完成后计时 未完成实例永不过期`() = runTest {
+        val instances = FakeInstanceDao()
+        val m = manager(mutableListOf(cooldownTemplate()), instances)
+        m.rolloverAll(millisOf(LocalDate.of(2025, 1, 10), 10), zone)
+
+        // 一年后结算：仍只有这一条 ACTIVE 实例，不作废不新增
+        m.rolloverAll(millisOf(LocalDate.of(2026, 1, 10), 10), zone)
+
+        assertEquals(1, instances.instances.size)
+        assertEquals(InstanceStatus.ACTIVE.name, instances.instances[0].status)
+    }
+
+    @Test
+    fun `完成后计时 冷却到期生成新实例 旧实例保留为历史`() = runTest {
+        val instances = FakeInstanceDao(
+            mutableListOf(
+                TaskInstanceEntity(
+                    id = 1, templateId = 1,
+                    cycleStart = millisOf(LocalDate.of(2025, 1, 1)),
+                    windowStart = millisOf(LocalDate.of(2025, 1, 1)),
+                    windowEnd = millisOf(LocalDate.of(2025, 1, 13)), // 恢复日 = 完成日 1-10 + 3
+                    status = "COMPLETED",
+                    completedAt = millisOf(LocalDate.of(2025, 1, 10), 14)
+                )
+            )
+        )
+        val m = manager(mutableListOf(cooldownTemplate()), instances)
+
+        // 恢复日前一天结算：不生成
+        m.rolloverAll(millisOf(LocalDate.of(2025, 1, 12), 10), zone)
+        assertEquals(1, instances.instances.size)
+
+        // 恢复日当天结算：生成新未完成实例（起点 = 1-13），旧实例保留为已完成历史
+        m.rolloverAll(millisOf(LocalDate.of(2025, 1, 13), 8), zone)
+        assertEquals(2, instances.instances.size)
+        assertEquals(1, instances.instances.count { it.status == InstanceStatus.COMPLETED.name })
+        val active = instances.instances.single { it.status == InstanceStatus.ACTIVE.name }
+        assertEquals(millisOf(LocalDate.of(2025, 1, 13)), active.cycleStart)
+        assertEquals(Long.MAX_VALUE, active.windowEnd)
+    }
+
+    @Test
+    fun `完成后计时 编辑间隔天数 冷却按原完成日期重算恢复日`() = runTest {
+        val template = cooldownTemplate(intervalDays = 30)
+        val templates = mutableListOf(template)
+        val instances = FakeInstanceDao(
+            mutableListOf(
+                TaskInstanceEntity(
+                    id = 1, templateId = 1,
+                    cycleStart = millisOf(LocalDate.of(2025, 1, 1)),
+                    windowStart = millisOf(LocalDate.of(2025, 1, 1)),
+                    windowEnd = millisOf(LocalDate.of(2025, 2, 9)), // 1-10 + 30
+                    status = "COMPLETED",
+                    completedAt = millisOf(LocalDate.of(2025, 1, 10), 14)
+                )
+            )
+        )
+        val m = manager(templates, instances)
+
+        // N 从 30 改成 7：先落库再 regenerate（与编辑页保存路径一致），
+        // 恢复日按原完成日期重算为 1-10 + 7 = 1-17
+        val updated = template.copy(intervalDays = 7)
+        templates.replaceAll { updated }
+        m.regenerateActiveInstance(updated, millisOf(LocalDate.of(2025, 1, 12), 10), zone)
+        val cooling = instances.instances.single { it.status == InstanceStatus.COMPLETED.name }
+        assertEquals(millisOf(LocalDate.of(2025, 1, 17)), cooling.windowEnd)
+
+        // 推进到恢复日：结算生成新未完成实例（起点 1-17）
+        m.rolloverAll(millisOf(LocalDate.of(2025, 1, 17), 8), zone)
+        val active = instances.instances.single { it.status == InstanceStatus.ACTIVE.name }
+        assertEquals(millisOf(LocalDate.of(2025, 1, 17)), active.cycleStart)
+    }
+
+    @Test
+    fun `完成后计时 编辑间隔天数致恢复日已过 结算立即恢复`() = runTest {
+        val template = cooldownTemplate(intervalDays = 30)
+        val instances = FakeInstanceDao(
+            mutableListOf(
+                TaskInstanceEntity(
+                    id = 1, templateId = 1,
+                    cycleStart = millisOf(LocalDate.of(2025, 1, 1)),
+                    windowStart = millisOf(LocalDate.of(2025, 1, 1)),
+                    windowEnd = millisOf(LocalDate.of(2025, 2, 9)),
+                    status = "COMPLETED",
+                    completedAt = millisOf(LocalDate.of(2025, 1, 10), 14)
+                )
+            )
+        )
+        val m = manager(mutableListOf(template), instances)
+
+        // 2-10 时把 N 改成 7：恢复日重算为 1-17 早已过去 → 同次保存的结算立即生成新实例
+        m.regenerateActiveInstance(
+            template.copy(intervalDays = 7),
+            millisOf(LocalDate.of(2025, 2, 10), 10), zone
+        )
+
+        val active = instances.instances.single { it.status == InstanceStatus.ACTIVE.name }
+        assertEquals(millisOf(LocalDate.of(2025, 1, 17)), active.cycleStart)
+        assertEquals(Long.MAX_VALUE, active.windowEnd)
+    }
+
+    @Test
+    fun `完成后计时 从其他类型切入且最新实例已完成 按原完成时间进入冷却`() = runTest {
+        val instances = FakeInstanceDao(
+            mutableListOf(
+                TaskInstanceEntity(
+                    id = 1, templateId = 1,
+                    cycleStart = millisOf(LocalDate.of(2025, 1, 6)),
+                    windowStart = millisOf(LocalDate.of(2025, 1, 6)),
+                    windowEnd = millisOf(LocalDate.of(2025, 1, 8)),
+                    status = "COMPLETED",
+                    completedAt = millisOf(LocalDate.of(2025, 1, 7), 9)
+                )
+            )
+        )
+        val m = manager(mutableListOf(weeklyTemplate()), instances)
+
+        // 编辑为完成后计时（间隔 3 天）：恢复日 = 1-7 + 3 = 1-10；今天 1-08 未到，仍冷却中
+        m.regenerateActiveInstance(
+            weeklyTemplate().copy(recurrenceType = "AFTER_COMPLETION", intervalDays = 3),
+            millisOf(LocalDate.of(2025, 1, 8), 10), zone
+        )
+
+        assertEquals(1, instances.instances.size)
+        val cooling = instances.instances[0]
+        assertEquals(InstanceStatus.COMPLETED.name, cooling.status)
+        assertEquals(millisOf(LocalDate.of(2025, 1, 10)), cooling.windowEnd)
     }
 }

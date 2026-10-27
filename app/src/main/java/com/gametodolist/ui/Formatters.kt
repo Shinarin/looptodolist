@@ -41,6 +41,7 @@ fun TaskTemplateEntity.recurrenceLabel(): String =
             "每周$days"
         }
         RecurrenceType.MONTHLY -> "每月 ${monthDay} 日"
+        RecurrenceType.AFTER_COMPLETION -> "完成后每 ${intervalDays} 天"
     }
 
 /** 剩余天数：长期有效/尚未开始返回 null；已截止返回负数 */
@@ -72,5 +73,21 @@ fun remainingLabel(
         days == 0L -> "今日截止"
         days == 1L -> "明日截止"
         else -> "剩 $days 天"
+    }
+}
+
+/**
+ * 完成后计时的冷却恢复倒计时文案（windowEnd = 恢复日零点）；
+ * 长期有效（未进入冷却）返回 null。已过时按「今日恢复」显示（结算会随即恢复）
+ */
+fun cooldownLabel(windowEnd: Long, referenceMillis: Long = System.currentTimeMillis()): String? {
+    if (windowEnd == Long.MAX_VALUE) return null
+    val refDay = Instant.ofEpochMilli(referenceMillis).atZone(zone).toLocalDate()
+    val endDay = Instant.ofEpochMilli(windowEnd).atZone(zone).toLocalDate()
+    val days = ChronoUnit.DAYS.between(refDay, endDay)
+    return when {
+        days <= 0L -> "今日恢复"
+        days == 1L -> "明日恢复"
+        else -> "剩 $days 天恢复"
     }
 }

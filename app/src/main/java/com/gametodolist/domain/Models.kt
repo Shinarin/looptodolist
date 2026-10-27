@@ -1,7 +1,7 @@
 package com.gametodolist.domain
 
-/** 循环类型 */
-enum class RecurrenceType { NONE, INTERVAL_DAYS, WEEKLY, MONTHLY }
+/** 循环类型；AFTER_COMPLETION = 完成后计时（月卡模式：点完成后过 N 天自动恢复未完成） */
+enum class RecurrenceType { NONE, INTERVAL_DAYS, WEEKLY, MONTHLY, AFTER_COMPLETION }
 
 /** 显示时段模式 */
 enum class WindowMode { FULL_CYCLE, CUSTOM }

@@ -30,13 +30,13 @@ data class TaskEditUiState(
     val note: String = "",
     val categoryId: Long? = null,
     val recurrenceType: RecurrenceType = RecurrenceType.NONE,
-    /** INTERVAL_DAYS：间隔天数；null = 输入框为空（显示虚化占位 1，保存时按 1 存） */
+    /** INTERVAL_DAYS/AFTER_COMPLETION：间隔天数；null = 输入框为空（显示虚化占位 1，保存时按 1 存） */
     val intervalDays: Int? = null,
     val weekdaysMask: Int = 0,
     val monthDay: Int = 1,
     /** WEEKLY/MONTHLY：是否指定开始日期（未指定 = 立即开始，存 anchorDate=0） */
     val anchorEnabled: Boolean = false,
-    /** 起始日期（本地零点毫秒）：NONE/INTERVAL_DAYS 始终使用；WEEKLY/MONTHLY 仅 anchorEnabled 时生效 */
+    /** 起始日期（本地零点毫秒）：NONE/INTERVAL_DAYS/AFTER_COMPLETION 始终使用；WEEKLY/MONTHLY 仅 anchorEnabled 时生效 */
     val anchorDate: Long = LocalDate.now().atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli(),
     val windowMode: WindowMode = WindowMode.FULL_CYCLE,
     /** CUSTOM 显示时段：从循环起点起显示的天数（1 = 显示 1 天，最小 1） */
@@ -135,10 +135,13 @@ class TaskEditViewModel @Inject constructor(
                     weekdaysMask = s.weekdaysMask,
                     monthDay = s.monthDay.coerceIn(1, 31),
                     anchorDate = when (s.recurrenceType) {
-                        RecurrenceType.NONE, RecurrenceType.INTERVAL_DAYS -> s.anchorDate
+                        RecurrenceType.NONE, RecurrenceType.INTERVAL_DAYS,
+                        RecurrenceType.AFTER_COMPLETION -> s.anchorDate
                         else -> if (s.anchorEnabled) s.anchorDate else 0L
                     },
-                    windowMode = s.windowMode.name,
+                    // 完成后计时一律长期有效（不过期），不存自定义显示时段
+                    windowMode = if (s.recurrenceType == RecurrenceType.AFTER_COMPLETION)
+                        WindowMode.FULL_CYCLE.name else s.windowMode.name,
                     customWindowDays = s.customWindowDays.coerceAtLeast(1),
                     reminderEnabled = s.reminderEnabled,
                     reminderMinutesBefore = s.reminderMinutesBefore

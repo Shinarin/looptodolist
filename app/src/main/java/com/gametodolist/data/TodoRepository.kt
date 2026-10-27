@@ -7,6 +7,7 @@ import com.gametodolist.data.entity.CategoryEntity
 import com.gametodolist.data.entity.TaskInstanceEntity
 import com.gametodolist.data.entity.TaskTemplateEntity
 import com.gametodolist.domain.InstanceStatus
+import com.gametodolist.domain.RecurrenceEngine
 import com.gametodolist.domain.RecurrenceType
 import com.gametodolist.domain.RolloverManager
 import com.gametodolist.domain.toRecurrenceType
@@ -81,10 +82,33 @@ class TodoRepository @Inject constructor(
     }
 
     // ---------- 任务实例 ----------
-    suspend fun completeInstance(instanceId: Long) =
-        instanceDao.markCompleted(instanceId, System.currentTimeMillis())
+    /** 完成：完成后计时类型同时把窗口终点改写为冷却恢复日（完成日期 + 间隔天数） */
+    suspend fun completeInstance(instanceId: Long) {
+        val now = System.currentTimeMillis()
+        val instance = instanceDao.getById(instanceId)
+        val template = instance?.let { templateDao.getById(it.templateId) }
+        if (template != null &&
+            template.recurrenceType.toRecurrenceType() == RecurrenceType.AFTER_COMPLETION
+        ) {
+            val windowEnd = RecurrenceEngine.cooldownWindowEndMillis(now, template, ZoneId.systemDefault())
+            instanceDao.markCompletedWithWindowEnd(instanceId, now, windowEnd)
+        } else {
+            instanceDao.markCompleted(instanceId, now)
+        }
+    }
 
-    suspend fun uncompleteInstance(instanceId: Long) = instanceDao.markActive(instanceId)
+    /** 撤销完成：完成后计时类型同时把窗口终点改回长期有效（取消冷却） */
+    suspend fun uncompleteInstance(instanceId: Long) {
+        val instance = instanceDao.getById(instanceId)
+        val template = instance?.let { templateDao.getById(it.templateId) }
+        if (template != null &&
+            template.recurrenceType.toRecurrenceType() == RecurrenceType.AFTER_COMPLETION
+        ) {
+            instanceDao.markActiveWithWindowEnd(instanceId, Long.MAX_VALUE)
+        } else {
+            instanceDao.markActive(instanceId)
+        }
+    }
 
     /** 所有未归档模板 */
     fun observeTemplates(): Flow<List<TaskTemplateEntity>> = templateDao.observeActive()

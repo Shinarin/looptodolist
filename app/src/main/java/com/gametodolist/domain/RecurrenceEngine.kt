@@ -18,11 +18,14 @@ data class TimeWindow(val startMillis: Long, val endMillis: Long)
  * - MONTHLY：每月 monthDay 日（短月钳制到月末）为循环起点
  * - WEEKLY/MONTHLY 设置了 anchorDate 时：首个循环不早于 anchor（之前无循环）；
  *   日号/星期规则不变，anchor <= 0 时行为与未设置一致
+ * - AFTER_COMPLETION（完成后计时）：无日历锚定的循环，未完成实例窗口恒为长期有效；
+ *   恢复日 = 完成日期 + intervalDays（日粒度），由 RolloverManager 按实例 completedAt 结算
  *
  * 显示窗口：
  * - FULL_CYCLE：[本次循环起点 00:00, 下次循环起点 00:00)
  * - CUSTOM：[循环起点日 00:00, 循环起点日 + customWindowDays 天 00:00)，
  *   customWindowDays 最小为 1（1 = 显示 1 天，2 = 显示 2 天，依次类推）
+ * - AFTER_COMPLETION：恒为 [起点 00:00, 长期有效)，忽略 windowMode
  */
 object RecurrenceEngine {
 
@@ -69,6 +72,10 @@ object RecurrenceEngine {
                 val nextMonth = cycleStart.plusMonths(1)
                 clampMonthDay(t.monthDay, nextMonth)
             }
+            // 完成后计时：真实锚点在完成时刻（RolloverManager 按 completedAt 特判），
+            // 这里只提供日历驱动的兜底推算（日历预演等场景用）
+            RecurrenceType.AFTER_COMPLETION ->
+                cycleStart.plusDays(t.intervalDays.coerceAtLeast(1).toLong())
         }
 
     /** 包含 [date]（或其之前最近一次）的循环起点日期 */
@@ -96,11 +103,18 @@ object RecurrenceEngine {
                 if (t.anchorDate > 0) maxOf(current, firstMonthlyCycleOnOrAfter(anchorDateOf(t, zone), t))
                 else current
             }
+            // 完成后计时：等待完成期间与不循环一致，锚在开始日期
+            RecurrenceType.AFTER_COMPLETION -> anchorDateOf(t, zone)
         }
 
     /** 计算某个循环的显示窗口 */
     fun computeWindow(cycleStart: LocalDate, t: TaskTemplateEntity, zone: ZoneId): TimeWindow {
         val mode = t.windowMode.toWindowMode()
+        // 完成后计时：未完成实例长期有效（不过期），冷却期窗口由完成动作改写，不走这里
+        if (typeOf(t) == RecurrenceType.AFTER_COMPLETION) {
+            val start = cycleStart.atStartOfDay(zone).toInstant().toEpochMilli()
+            return TimeWindow(start, Long.MAX_VALUE)
+        }
         // 不循环：FULL_CYCLE = 长期有效；CUSTOM = 从开始日期起持续 N 天，到期作废
         if (typeOf(t) == RecurrenceType.NONE) {
             val start = cycleStart.atStartOfDay(zone)
@@ -127,4 +141,13 @@ object RecurrenceEngine {
             }
         }
     }
+
+    /** AFTER_COMPLETION：冷却恢复日 = 完成日期 + intervalDays（日粒度，与时刻无关） */
+    fun cooldownEndDate(completedDate: LocalDate, t: TaskTemplateEntity): LocalDate =
+        completedDate.plusDays(t.intervalDays.coerceAtLeast(1).toLong())
+
+    /** AFTER_COMPLETION：由完成时间戳算冷却窗口终点（恢复日的本地零点毫秒） */
+    fun cooldownWindowEndMillis(completedAtMillis: Long, t: TaskTemplateEntity, zone: ZoneId): Long =
+        cooldownEndDate(Instant.ofEpochMilli(completedAtMillis).atZone(zone).toLocalDate(), t)
+            .atStartOfDay(zone).toInstant().toEpochMilli()
 }

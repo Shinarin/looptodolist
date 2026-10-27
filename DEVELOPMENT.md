@@ -67,6 +67,7 @@ data/ (Room: AppDatabase + 3 DAO + TodoRepository)
 | `INTERVAL_DAYS` | 以锚点为基准每 N 天 |
 | `WEEKLY` | `weekdaysMask` 位掩码选中的每个星期几（bit0=周一…bit6=周日） |
 | `MONTHLY` | 每月 `monthDay` 日，短月钳制到月末 |
+| `AFTER_COMPLETION` | 完成后计时（月卡模式）：无日历锚定，恢复日 = 完成日期 + `intervalDays` |
 
 **锚点（anchorDate）**：本地零点毫秒，`<= 0` 表示未设置（回退用 `createdAt`）。WEEKLY/MONTHLY 设置锚点后**首个循环不早于锚点**（之前无循环）。
 
@@ -74,6 +75,9 @@ data/ (Room: AppDatabase + 3 DAO + TodoRepository)
 
 - `FULL_CYCLE`：[本次循环起点 00:00, 下次循环起点 00:00)。NONE 的 FULL_CYCLE = 长期有效（end = `Long.MAX_VALUE`）。
 - `CUSTOM`：[循环起点 00:00, 起点 + N 天 00:00)，N ≥ 1。
+- `AFTER_COMPLETION`：恒为 [起点 00:00, 长期有效)，忽略 windowMode。
+
+**完成后计时（AFTER_COMPLETION，月卡模式）**：未完成实例窗口恒为长期有效（不过期不作废）；点完成时实例 `windowEnd` 被改写为「完成日期 + N 天」的本地零点（进入冷却，由 `TodoRepository.completeInstance` 特判，撤销完成改回长期有效）；冷却到期后结算以恢复日（= `completedAt` 日期 + N，`cooldownEndDate`）为起点生成新未完成实例，旧实例保留为已完成历史。编辑间隔天数保存时按原完成日期以新 N 重算恢复日（`regenerateLocked` 末尾特判），恢复日已过则同次结算立即恢复；从其他类型切入且最新实例已完成时按其完成时间起算。提醒无截止时间语义，固定恢复日当天 09:00 触发（`ReminderScheduler` 对该类型单独算触发点）。
 
 三个 public 函数：`currentCycleStartDate`（含某日的循环起点）、`nextCycleStartDate`（下一个起点）、`computeWindow`（算窗口）。WEEKLY 的 `weekdaysMask` 为 0 是非法状态，直接 `require` 抛异常（编辑页已拦截，日历页对异常模板跳过并记日志）。
 

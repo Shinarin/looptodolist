@@ -13,6 +13,7 @@ import com.gametodolist.domain.RolloverManager
 import com.gametodolist.domain.toRecurrenceType
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.map
 import java.time.LocalDate
 import java.time.ZoneId
 import javax.inject.Inject
@@ -30,12 +31,13 @@ data class CategoryGroup(
     val items: List<TemplateWithInstance>
 )
 
-/** 主页数据：未完成 / 已完成 / 已作废 三个分区，各自再按分类分组 */
+/** 主页数据：未完成 / 已完成 / 已作废 / 已停用分区，各自再按分类分组 */
 data class HomeData(
     val activeGroups: List<CategoryGroup>,
     val completedGroups: List<CategoryGroup>,
     /** 已作废（最新实例 EXPIRED，基本只有一次性+自定义天数任务会落这里） */
-    val expiredGroups: List<CategoryGroup> = emptyList()
+    val expiredGroups: List<CategoryGroup> = emptyList(),
+    val pausedGroups: List<CategoryGroup> = emptyList()
 )
 
 @Singleton
@@ -68,6 +70,11 @@ class TodoRepository @Inject constructor(
         else { templateDao.update(template); template.id }
 
     suspend fun deleteTemplate(id: Long) = templateDao.deleteById(id)
+
+    suspend fun setTemplatePaused(templateId: Long, paused: Boolean) {
+        val template = templateDao.getById(templateId) ?: return
+        templateDao.update(template.copy(paused = paused))
+    }
 
     /** 「重新开启」已作废任务：一次性任务开始日期重置为今天；循环任务按规则算当前循环，无需改开始日期 */
     suspend fun reviveTemplate(templateId: Long) {
@@ -110,15 +117,14 @@ class TodoRepository @Inject constructor(
         }
     }
 
-    /** 所有未归档模板 */
-    fun observeTemplates(): Flow<List<TaskTemplateEntity>> = templateDao.observeActive()
+    /** 未归档且未停用模板：日历待办预演与更新日打点使用 */
+    fun observeUnpausedTemplates(): Flow<List<TaskTemplateEntity>> =
+        templateDao.observeActive().map { templates -> templates.filterNot { it.paused } }
 
     /** 每个模板的最新实例 */
     fun observeLatestInstances(): Flow<List<TaskInstanceEntity>> = instanceDao.observeLatestPerTemplate()
 
-    /** 主页数据：按每个模板的最新实例分为「未完成」「已完成」「已作废」三区，
-     * 各区内再按分类分组；已作废区主要是一次性+自定义天数任务，也可能有编辑留痕的循环任务（均可重新开启）。
-     */
+    /** 主页按最新实例状态分区；停用模板独立分组，不重复进入状态分区。 */
     fun observeHomeData(): Flow<HomeData> =
         combine(
             categoryDao.observeAll(),
@@ -127,10 +133,8 @@ class TodoRepository @Inject constructor(
         ) { categories, templates, latestInstances ->
             val instanceByTemplate = latestInstances.associateBy { it.templateId }
 
-            fun groupsFor(status: String): List<CategoryGroup> {
-                val groups = templates
-                    .filter { instanceByTemplate[it.id]?.status == status }
-                    .groupBy { it.categoryId }
+            fun groupsFor(include: (TaskTemplateEntity) -> Boolean): List<CategoryGroup> {
+                val groups = templates.filter(include).groupBy { it.categoryId }
                 val result = mutableListOf<CategoryGroup>()
                 categories.forEach { cat ->
                     val items = groups[cat.id].orEmpty()
@@ -146,9 +150,16 @@ class TodoRepository @Inject constructor(
             }
 
             HomeData(
-                activeGroups = groupsFor(InstanceStatus.ACTIVE.name),
-                completedGroups = groupsFor(InstanceStatus.COMPLETED.name),
-                expiredGroups = groupsFor(InstanceStatus.EXPIRED.name)
+                activeGroups = groupsFor {
+                    !it.paused && instanceByTemplate[it.id]?.status == InstanceStatus.ACTIVE.name
+                },
+                completedGroups = groupsFor {
+                    !it.paused && instanceByTemplate[it.id]?.status == InstanceStatus.COMPLETED.name
+                },
+                expiredGroups = groupsFor {
+                    !it.paused && instanceByTemplate[it.id]?.status == InstanceStatus.EXPIRED.name
+                },
+                pausedGroups = groupsFor { it.paused && instanceByTemplate.containsKey(it.id) }
             )
         }
 }

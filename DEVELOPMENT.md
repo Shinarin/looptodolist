@@ -103,21 +103,22 @@ data/ (Room: AppDatabase + 3 DAO + TodoRepository)
 
 ## 5. 数据层（data/）
 
-### 5.1 表结构（DB v3）
+### 5.1 表结构（DB v4）
 
 - `categories`：名称、颜色（ARGB Long）、icon、sortOrder。
-- `task_templates`：规则字段见 §4.1；`sortOrder` 是预留字段（恒 0，未启用拖拽排序）；`customStartMinutes/customEndMinutes` 已废弃（CUSTOM 简化为按天数）。
+- `task_templates`：规则字段见 §4.1；`paused` 是模板级停用标记（不改变实例状态或窗口，循环与冷却继续计时）；`sortOrder` 是预留字段（恒 0，未启用拖拽排序）；`customStartMinutes/customEndMinutes` 已废弃（CUSTOM 简化为按天数）。
 - `task_instances`：`templateId` 外键 **CASCADE 删除**；索引含 `(templateId, cycleStart)` **唯一索引**（防并发结算重复插入）。
 
-迁移：v1→v2 加 `anchorDate` 列；v2→v3 先去重再加唯一索引。
+迁移：v1→v2 加 `anchorDate` 列；v2→v3 先去重再加唯一索引；v3→v4 加 `paused INTEGER NOT NULL DEFAULT 0`。
 
 > ⚠️ **绝不能用 REPLACE 插入模板**——REPLACE 实际是 DELETE+INSERT，会触发实例表 FK CASCADE 清空该模板全部实例历史。模板/分类保存一律走 `TodoRepository` 的 insert/update 分流（`id == 0L` 判断）。实例表的 `insert` 是 REPLACE 但只用于结算器内部撞唯一索引的场景，属设计内行为。
 
 ### 5.2 TodoRepository
 
-- 写操作：`upsertCategory` / `saveTemplate`（insert/update 分流）、`deleteCategory`（先把该分类下模板的 categoryId 置 NULL 再删分类）、`deleteTemplate`、`completeInstance` / `uncompleteInstance`、`reviveTemplate`（仅 NONE 类型有效）。
+- 写操作：`upsertCategory` / `saveTemplate`（insert/update 分流）、`deleteCategory`（先把该分类下模板的 categoryId 置 NULL 再删分类）、`deleteTemplate`、`setTemplatePaused`（只切模板标记，不改实例或日期）、`completeInstance` / `uncompleteInstance`、`reviveTemplate`（仅 NONE 类型有效）。
 - 读操作（Flow）：
-  - `observeHomeData()`：主页数据 = combine（分类、未归档模板、每模板最新实例）→ 按最新实例状态分 **未完成 / 已完成 / 已作废** 三区，每区再按分类分组（未分类组排最后，空组不出现）。
+  - `observeHomeData()`：主页数据 = combine（分类、未归档模板、每模板最新实例）→ 分 **未完成 / 已完成 / 已作废 / 已停用** 四区，每区再按分类分组（未分类组排最后，空组不出现）。停用模板只进停用区，因此组件沿用未完成/已完成分组即可隐藏停用项；结算器仍处理这些模板。
+  - `observeUnpausedTemplates()`：排除停用模板，日历待办预演与更新日打点共用。
   - `observeLatestInstances()`：每模板最新实例（按 cycleStart 取 MAX），主页/日历/小组件共用。
 
 ## 6. 统一管线（sync/DataSyncManager）
@@ -136,11 +137,11 @@ suspend fun settleAndRefresh() {
 
 ## 7. UI 层（ui/）
 
-底部三栏（清单 / 日历 / 设置）+ 两个二级页（分类管理、任务编辑），`AppNav.kt` NavHost，切换动画 fade 150ms。编辑路由 `edit?templateId={}&anchorDate={}`（-1 表示新建 / 未指定日期）。**所有页面统一用紧凑标题栏**（`statusBarsPadding` + 小 padding），不用原生 `TopAppBar`（它比紧凑栏多一截顶部留白）。
+底部三栏（清单 / 日历 / 设置）+ 两个二级页（分类管理、任务编辑），`AppNav.kt` NavHost，切换动画 fade 150ms；`NavigationBar` 上方是 1dp `colorScheme.primary` 主题色分隔线。编辑路由 `edit?templateId={}&anchorDate={}`（-1 表示新建 / 未指定日期）。**所有页面统一用紧凑标题栏**（`statusBarsPadding` + 小 padding），不用原生 `TopAppBar`（它比紧凑栏多一截顶部留白）。
 
-- **主页** `home/`：紧凑标题栏 + 三分区（未完成 / 已完成划线 / 已作废可点击编辑、左滑删除、"重新开启"）+ 分类分组折叠（折叠状态在 `HomeViewModel`，切 tab 不丢）。**无右滑手势**（误划问题）；左滑露出红色「删除」按钮停住、点击按钮才触发删除（`SwipeRevealDeleteBox`：AnchoredDraggable 双锚点 Closed/Revealed，自实现，不用 SwipeToDismissBox——它不支持"停住露出"态）。删除警示弹窗带「不再提醒」勾选，关掉后点删除直接删；设置页「删除清单前提醒」开关可恢复（`data/SettingsPrefs.kt`，SharedPreferences `app_settings`）。任务列表底部留白 88dp 避让悬浮添加按钮（日历页同理）。`HomeViewModel.init` 触发一次 `settleAndRefresh()`（即"回 App 即结算"）。
-- **日历页** `calendar/`：不查库预演——对每个模板用引擎算所选日期的窗口，覆盖该日即显示；该循环已有真实实例则取真实状态。月视图打点 = 循环更新日。未来日期可看。"回到今天"按钮。点"+"进编辑页时带入所选日期为默认开始日期。
-- **编辑页** `edit/`：开始日期（NONE/INTERVAL_DAYS 直接显示日期选择；WEEKLY/MONTHLY 经"指定开始日期"开关，不开则 anchorDate=0 立即开始）、显示时段（整循环 vs 自定义 N 天）、提醒开关与提前量。脏状态返回弹"放弃修改"确认（快照对比，忽略 saving/saved 等过程字段）。编辑模式有删除入口（带确认）。保存后若是编辑，先 `regenerateActiveInstance` 再走统一管线。
+- **主页** `home/`：紧凑标题栏 + 四分区（未完成 / 已完成划线 / 已作废可点击编辑、"重新开启" / 已停用灰化划线）+ 分类分组折叠（折叠状态在 `HomeViewModel`，切 tab 不丢）。**无右滑手势**（误划问题）；左滑露出「停用/删除」（已停用为「恢复/删除」，已作废仅删除）停住、点击按钮才执行（`SwipeRevealActionsBox`：AnchoredDraggable 双锚点 Closed/Revealed，位置门槛 65%、速度门槛 700dp/s，降低斜向滚动误触）。停用只切模板 `paused`，循环与冷却继续计时，恢复不重算日期。删除警示弹窗带「不再提醒」勾选，关掉后点删除直接删；设置页「删除清单前提醒」开关可恢复（`data/SettingsPrefs.kt`，SharedPreferences `app_settings`）。任务列表底部留白 88dp 避让悬浮添加按钮（日历页同理）。`HomeViewModel.init` 触发一次 `settleAndRefresh()`（即"回 App 即结算"）。
+- **日历页** `calendar/`：对每个未停用模板用引擎算所选日期的窗口，覆盖该日即显示；该循环已有真实实例则取真实状态。月视图打点 = 循环更新日，停用模板的任务与打点均排除。未来日期可看。"回到今天"按钮。点"+"进编辑页时带入所选日期为默认开始日期。
+- **编辑页** `edit/`：开始日期（NONE/INTERVAL_DAYS 直接显示日期选择；WEEKLY/MONTHLY 经"指定开始日期"开关，不开则 anchorDate=0 立即开始）、显示时段（整循环 vs 自定义 N 天）、提醒开关与提前量。脏状态返回弹"放弃修改"确认（快照对比，忽略 saving/saved 等过程字段）。编辑模式有删除入口（带确认）。`toTaskTemplate` 保留加载时的 `paused`，保存已有模板不会意外恢复；保存后若是编辑，先 `regenerateActiveInstance` 再走统一管线。
 - **分类管理** `category/`：增删改 + 色板（FlowRow 横纵都留间距），删除有确认。
 - **设置页** `settings/`：小组件外观（纯色透明度 / 壁纸变暗度 / 更换壁纸）+ 精确闹钟授权状态（可跳系统设置）。**更换壁纸与组件头部图片按钮统一走中转页 `WidgetWallpaperPickActivity`**：系统选图 → `WallpaperImporter.saveToPending`（按屏幕长边封顶 1440..3200px、JPEG q92、先读边界按 2 的幂采样防 OOM）→ 直接进裁剪页（挂起模式），保存才生效、取消则旧壁纸原样保留（暂存式提交，见小组件节第 8 条）；返回本页时 ON_RESUME 重读落盘状态刷新预览（`refreshWallpaperState`）。滑块拖动中只落盘（`persist`），松手才刷新组件，避免拖动期间狂刷 RemoteViews。壁纸"效果预览"为页面宽 60% 的居中 1:1 方形，对裁剪区域（无则用原图）做居中最大裁剪，不固定比例拉伸。
 - `Formatters.kt`：日期/循环规则/剩余时间文案（"今日截止 / 剩 N 天 / 长期有效"等），UI 与小组件共用。
@@ -150,14 +151,14 @@ ViewModel 统一模式：写操作包 `try/catch` 转成 `errorMessage` StateFlo
 
 ## 8. 提醒（notify/）
 
-- `ReminderScheduler`：AlarmManager 精确闹钟（`setExactAndAllowWhileIdle`）。Android 14+ 未授权 `SCHEDULE_EXACT_ALARM` 时自动降级 `setAndAllowWhileIdle`（可能延迟但不崩溃）。提醒时刻 = `windowEnd - reminderMinutesBefore`。PendingIntent requestCode 用 `instanceId xor Int.MIN_VALUE`（避开通知 id 冲突）。
-- `ReminderReceiver`：闹钟触发后**先查库校验实例仍 ACTIVE** 才弹通知；若已完成/作废/删除则顺手 `cancel` 掉残留闹钟（自清），不弹。通知点击回 MainActivity。Android 13+ 无通知权限直接不弹（MainActivity 启动时请求权限）。
+- `ReminderScheduler`：AlarmManager 精确闹钟（`setExactAndAllowWhileIdle`）。Android 14+ 未授权 `SCHEDULE_EXACT_ALARM` 时自动降级 `setAndAllowWhileIdle`（可能延迟但不崩溃）。提醒时刻 = `windowEnd - reminderMinutesBefore`。PendingIntent requestCode 用 `instanceId xor Int.MIN_VALUE`（避开通知 id 冲突）。停用模板先 `cancel` 再返回，恢复后由统一管线重排。
+- `ReminderReceiver`：闹钟触发后**先查库校验实例仍 ACTIVE 且模板未停用** 才弹通知；若实例已结束或模板已停用则顺手 `cancel` 掉残留闹钟（自清），不弹。通知点击回 MainActivity。Android 13+ 无通知权限直接不弹（MainActivity 启动时请求权限）。
 - `RolloverWorker`：WorkManager 周期任务（12 小时，`ExistingPeriodicWorkPolicy.KEEP`），内容就是 `settleAndRefresh()`。最多重试 3 次。
 - `BootReceiver`：开机完成后 enqueue 一次性 RolloverWorker 补结算 + 重排闹钟（闹钟不持久化，重启后必须重排）。
 
 ## 9. 桌面小组件（widget/）
 
-Glance `TodoWidget`（`SizeMode.Exact` 拿真实尺寸，保证壁纸按实际宽高比裁剪）。内容与主页一致：未完成按分类分组 + 已完成区（默认收起，点标题展开）。
+Glance `TodoWidget`（`SizeMode.Exact` 拿真实尺寸，保证壁纸按实际宽高比裁剪）。只显示主页的未完成分组 + 已完成区（默认收起，点标题展开）；已停用、已作废项不显示。
 
 关键设计（都是踩坑后的结论，改动前必读）：
 
@@ -173,8 +174,8 @@ Glance `TodoWidget`（`SizeMode.Exact` 拿真实尺寸，保证壁纸按实际�
 ## 10. 依赖注入与入口
 
 - `GameTodoApp`（`@HiltAndroidApp`）：创建通知渠道、排周期结算 Worker、首启种默认分类（工作/生活/学习）。实现 `Configuration.Provider` 注入 `HiltWorkerFactory`。
-- `di/AppModule`：提供 Room 数据库（注册 MIGRATION_1_2 / 2_3）与三个 DAO。
-- 非 Hilt 场景（Glance 小组件、ReminderReceiver）通过 EntryPointAccessors 取依赖：`WidgetEntryPoint`（repository + dataSync）、`ReminderEntryPoint`（instanceDao + reminderScheduler）。
+- `di/AppModule`：提供 Room 数据库（注册 MIGRATION_1_2 / 2_3 / 3_4）与三个 DAO。
+- 非 Hilt 场景（Glance 小组件、ReminderReceiver）通过 EntryPointAccessors 取依赖：`WidgetEntryPoint`（repository + dataSync）、`ReminderEntryPoint`（instanceDao + templateDao + reminderScheduler）。
 
 ## 11. 权限与 Manifest 要点
 

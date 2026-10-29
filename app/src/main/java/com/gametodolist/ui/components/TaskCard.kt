@@ -42,7 +42,7 @@ import com.gametodolist.ui.remainingDays
 import com.gametodolist.ui.remainingLabel
 import com.gametodolist.ui.theme.CompletedGreen
 
-/** 任务卡片：左侧渐变分类色条 + 圆形勾选 + 标题/备注 + 剩余天数胶囊；completed 时标题划线 */
+/** 任务卡片：分类色条 + 完成控件 + 标题/备注 + 状态胶囊；完成或停用时标题灰化划线 */
 @Composable
 fun TaskCard(
     item: TemplateWithInstance,
@@ -50,7 +50,8 @@ fun TaskCard(
     onComplete: () -> Unit,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
-    completed: Boolean = false
+    completed: Boolean = false,
+    paused: Boolean = false
 ) {
     val template = item.template
     val instance = item.activeInstance
@@ -72,7 +73,11 @@ fun TaskCard(
     ) {
         Box {
             // 左侧 6dp 渐变色条，贴卡片左缘
-            val barColor = if (completed) categoryColor.copy(alpha = 0.45f) else categoryColor
+            val barColor = when {
+                paused -> MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.45f)
+                completed -> categoryColor.copy(alpha = 0.45f)
+                else -> categoryColor
+            }
             Box(
                 modifier = Modifier
                     .align(Alignment.CenterStart)
@@ -87,8 +92,18 @@ fun TaskCard(
                 modifier = Modifier.padding(start = 18.dp, top = 12.dp, end = 14.dp, bottom = 12.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                // 圆形完成按钮：未完成=分类色描边空心圆，已完成=绿底白勾（点击撤销完成）
-                if (completed) {
+                // 停用时完成控件不可点；已完成=绿底白勾，未完成=分类色描边空心圆
+                if (paused) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .border(
+                                2.5.dp,
+                                MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
+                                CircleShape
+                            )
+                    )
+                } else if (completed) {
                     Box(
                         modifier = Modifier
                             .size(24.dp)
@@ -125,9 +140,9 @@ fun TaskCard(
                     Text(
                         text = template.title,
                         style = MaterialTheme.typography.titleMedium.copy(
-                            textDecoration = if (completed) TextDecoration.LineThrough else null
+                            textDecoration = if (completed || paused) TextDecoration.LineThrough else null
                         ),
-                        color = if (completed) MaterialTheme.colorScheme.onSurfaceVariant
+                        color = if (completed || paused) MaterialTheme.colorScheme.onSurfaceVariant
                         else MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -160,9 +175,11 @@ fun TaskCard(
                     }
                 }
 
-                // 右侧：剩余天数胶囊（<=2 天橙、已截止红、其余分类色）；已完成显示绿色「已完成」；
-                // 完成后计时的冷却中实例改显恢复倒计时
-                if (instance != null) {
+                // 停用优先于实例状态；其余显示完成、冷却或剩余时间
+                if (paused) {
+                    Spacer(Modifier.width(10.dp))
+                    RemainingChip("停用", MaterialTheme.colorScheme.onSurfaceVariant)
+                } else if (instance != null) {
                     Spacer(Modifier.width(10.dp))
                     if (completed) {
                         val cooling = if (template.recurrenceType.toRecurrenceType() ==

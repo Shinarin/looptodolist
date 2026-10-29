@@ -43,10 +43,34 @@ data class TaskEditUiState(
     val customWindowDays: Int = 1,
     val reminderEnabled: Boolean = false,
     val reminderMinutesBefore: Int = 60,
+    val paused: Boolean = false,
     val saving: Boolean = false,
     val saved: Boolean = false,
     val errorMessage: String? = null
 )
+
+internal fun TaskEditUiState.toTaskTemplate(validCategoryId: Long?): TaskTemplateEntity =
+    TaskTemplateEntity(
+        id = id,
+        categoryId = validCategoryId,
+        title = title.trim(),
+        note = note.trim(),
+        recurrenceType = recurrenceType.name,
+        intervalDays = (intervalDays ?: 1).coerceAtLeast(1),
+        weekdaysMask = weekdaysMask,
+        monthDay = monthDay.coerceIn(1, 31),
+        anchorDate = when (recurrenceType) {
+            RecurrenceType.NONE, RecurrenceType.INTERVAL_DAYS,
+            RecurrenceType.AFTER_COMPLETION -> anchorDate
+            else -> if (anchorEnabled) anchorDate else 0L
+        },
+        windowMode = if (recurrenceType == RecurrenceType.AFTER_COMPLETION)
+            WindowMode.FULL_CYCLE.name else windowMode.name,
+        customWindowDays = customWindowDays.coerceAtLeast(1),
+        reminderEnabled = reminderEnabled,
+        reminderMinutesBefore = reminderMinutesBefore,
+        paused = paused
+    )
 
 @HiltViewModel
 class TaskEditViewModel @Inject constructor(
@@ -92,7 +116,8 @@ class TaskEditViewModel @Inject constructor(
                             windowMode = t.windowMode.toWindowMode(),
                             customWindowDays = t.customWindowDays.coerceAtLeast(1),
                             reminderEnabled = t.reminderEnabled,
-                            reminderMinutesBefore = t.reminderMinutesBefore
+                            reminderMinutesBefore = t.reminderMinutesBefore,
+                            paused = t.paused
                         )
                     }
                     snapshot = _uiState.value
@@ -125,27 +150,7 @@ class TaskEditViewModel @Inject constructor(
                 // 分类可能已在管理页被删除：失效的 categoryId 归入未分类，避免任务从主页「隐身」
                 val validCategoryId = s.categoryId
                     ?.takeIf { id -> categories.value.any { it.id == id } }
-                val entity = TaskTemplateEntity(
-                    id = s.id,
-                    categoryId = validCategoryId,
-                    title = s.title.trim(),
-                    note = s.note.trim(),
-                    recurrenceType = s.recurrenceType.name,
-                    intervalDays = (s.intervalDays ?: 1).coerceAtLeast(1),
-                    weekdaysMask = s.weekdaysMask,
-                    monthDay = s.monthDay.coerceIn(1, 31),
-                    anchorDate = when (s.recurrenceType) {
-                        RecurrenceType.NONE, RecurrenceType.INTERVAL_DAYS,
-                        RecurrenceType.AFTER_COMPLETION -> s.anchorDate
-                        else -> if (s.anchorEnabled) s.anchorDate else 0L
-                    },
-                    // 完成后计时一律长期有效（不过期），不存自定义显示时段
-                    windowMode = if (s.recurrenceType == RecurrenceType.AFTER_COMPLETION)
-                        WindowMode.FULL_CYCLE.name else s.windowMode.name,
-                    customWindowDays = s.customWindowDays.coerceAtLeast(1),
-                    reminderEnabled = s.reminderEnabled,
-                    reminderMinutesBefore = s.reminderMinutesBefore
-                )
+                val entity = s.toTaskTemplate(validCategoryId)
                 repository.saveTemplate(entity)
                 if (s.id != 0L) {
                     rolloverManager.regenerateActiveInstance(entity.copy(id = s.id))

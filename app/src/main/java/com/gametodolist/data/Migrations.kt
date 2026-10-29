@@ -23,3 +23,10 @@ val MIGRATION_2_3 = object : Migration(2, 3) {
         )
     }
 }
+
+/** v3 → v4：task_templates 增加 paused（停用仍按原规则继续计时）列 */
+val MIGRATION_3_4 = object : Migration(3, 4) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL("ALTER TABLE task_templates ADD COLUMN paused INTEGER NOT NULL DEFAULT 0")
+    }
+}

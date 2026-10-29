@@ -79,6 +79,13 @@ class HomeViewModel @Inject constructor(
         }
     }
 
+    fun togglePause(item: TemplateWithInstance) {
+        launchWrite {
+            repository.setTemplatePaused(item.template.id, !item.template.paused)
+            dataSync.settleAndRefresh()
+        }
+    }
+
     fun delete(item: TemplateWithInstance) {
         launchWrite {
             repository.deleteTemplate(item.template.id)

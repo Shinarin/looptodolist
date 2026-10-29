@@ -52,7 +52,7 @@ class CalendarViewModel @Inject constructor(
     private val _selectedDate = MutableStateFlow(LocalDate.now())
     val selectedDate: StateFlow<LocalDate> = _selectedDate.asStateFlow()
 
-    private val templates: StateFlow<List<TaskTemplateEntity>> = repository.observeTemplates()
+    private val templates: StateFlow<List<TaskTemplateEntity>> = repository.observeUnpausedTemplates()
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val latestInstances: StateFlow<List<TaskInstanceEntity>> = repository.observeLatestInstances()

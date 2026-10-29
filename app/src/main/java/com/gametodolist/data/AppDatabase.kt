@@ -11,7 +11,7 @@ import com.gametodolist.data.entity.TaskTemplateEntity
 
 @Database(
     entities = [CategoryEntity::class, TaskTemplateEntity::class, TaskInstanceEntity::class],
-    version = 3,
+    version = 4,
     exportSchema = true
 )
 abstract class AppDatabase : RoomDatabase() {

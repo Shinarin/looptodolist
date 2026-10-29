@@ -66,6 +66,10 @@ class ReminderScheduler @Inject constructor(
         val instance = instanceDao.getById(instanceId) ?: return
         if (instance.status != InstanceStatus.ACTIVE.name) return
         val template = templateDao.getById(instance.templateId) ?: return
+        if (template.paused) {
+            cancel(instanceId)
+            return
+        }
         if (!template.reminderEnabled) return
         if (template.recurrenceType.toRecurrenceType() == RecurrenceType.AFTER_COMPLETION) {
             // 完成后计时：无截止时间，在恢复日（= 新实例循环起点）当天 09:00 提醒；

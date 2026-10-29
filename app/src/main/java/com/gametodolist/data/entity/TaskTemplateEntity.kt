@@ -38,5 +38,6 @@ data class TaskTemplateEntity(
     val anchorDate: Long = 0,
 
     val archived: Boolean = false,
-    val createdAt: Long = System.currentTimeMillis()
+    val createdAt: Long = System.currentTimeMillis(),
+    val paused: Boolean = false
 )

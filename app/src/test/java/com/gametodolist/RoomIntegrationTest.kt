@@ -7,6 +7,7 @@ import com.gametodolist.data.TodoRepository
 import com.gametodolist.data.entity.TaskInstanceEntity
 import com.gametodolist.data.entity.TaskTemplateEntity
 import com.gametodolist.domain.RolloverManager
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.test.runTest
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -112,5 +113,77 @@ class RoomIntegrationTest {
         assertEquals("ACTIVE", restored.status)
         assertEquals(Long.MAX_VALUE, restored.windowEnd)
         assertEquals(null, restored.completedAt)
+    }
+
+    @Test
+    fun `停用模板仍按原规则推进循环`() = runTest {
+        val templateDao = db.taskTemplateDao()
+        val instanceDao = db.taskInstanceDao()
+        val rolloverManager = RolloverManager(templateDao, instanceDao)
+        val repository = TodoRepository(db.categoryDao(), templateDao, instanceDao, rolloverManager)
+        val zone = ZoneId.of("UTC")
+        fun day(day: Int) = LocalDate.of(2026, 10, day)
+            .atStartOfDay(zone).toInstant().toEpochMilli()
+        val id = templateDao.insert(
+            TaskTemplateEntity(
+                categoryId = null,
+                title = "持续计时",
+                recurrenceType = "INTERVAL_DAYS",
+                intervalDays = 7,
+                anchorDate = day(20)
+            )
+        )
+        val originalId = instanceDao.insert(
+            TaskInstanceEntity(
+                templateId = id,
+                cycleStart = day(20),
+                windowStart = day(20),
+                windowEnd = day(27)
+            )
+        )
+
+        repository.setTemplatePaused(id, true)
+        rolloverManager.rolloverAll(nowMillis = day(29), zone = zone)
+
+        val latest = instanceDao.getLatestForTemplate(id)
+        assertNotNull(latest)
+        assertEquals(day(27), latest!!.cycleStart)
+        assertEquals("ACTIVE", latest.status)
+        assertEquals("EXPIRED", instanceDao.getById(originalId)!!.status)
+        assertEquals(true, templateDao.getById(id)!!.paused)
+    }
+
+    @Test
+    fun `停用模板独立分组并在恢复后回到待办`() = runTest {
+        val templateDao = db.taskTemplateDao()
+        val instanceDao = db.taskInstanceDao()
+        val repository = TodoRepository(
+            db.categoryDao(), templateDao, instanceDao, RolloverManager(templateDao, instanceDao)
+        )
+        val id = templateDao.insert(TaskTemplateEntity(categoryId = null, title = "稍后处理"))
+        instanceDao.insert(
+            TaskInstanceEntity(
+                templateId = id,
+                cycleStart = 1000,
+                windowStart = 1000,
+                windowEnd = Long.MAX_VALUE
+            )
+        )
+
+        repository.setTemplatePaused(id, true)
+        val pausedHome = repository.observeHomeData().first()
+
+        assertEquals(0, pausedHome.activeGroups.size)
+        assertEquals(0, pausedHome.completedGroups.size)
+        assertEquals(0, pausedHome.expiredGroups.size)
+        assertEquals(id, pausedHome.pausedGroups.single().items.single().template.id)
+        assertEquals(0, repository.observeUnpausedTemplates().first().size)
+
+        repository.setTemplatePaused(id, false)
+        val resumedHome = repository.observeHomeData().first()
+
+        assertEquals(0, resumedHome.pausedGroups.size)
+        assertEquals(id, resumedHome.activeGroups.single().items.single().template.id)
+        assertEquals(id, repository.observeUnpausedTemplates().first().single().id)
     }
 }

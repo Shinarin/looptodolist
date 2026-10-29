@@ -18,7 +18,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
-/** 闹钟触发：先校验实例仍 ACTIVE，再弹出到期提醒通知 */
+/** 闹钟触发：先校验实例仍 ACTIVE 且模板未停用，再弹出到期提醒通知 */
 class ReminderReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
@@ -32,8 +32,11 @@ class ReminderReceiver : BroadcastReceiver() {
             try {
                 val entryPoint = ReminderEntryPoint.get(context)
                 val instance = entryPoint.instanceDao().getById(instanceId)
-                if (instance == null || instance.status != InstanceStatus.ACTIVE.name) {
-                    // 实例已完成/作废/删除：清理残留闹钟，不弹通知
+                val template = instance?.let { entryPoint.templateDao().getById(it.templateId) }
+                if (instance == null || instance.status != InstanceStatus.ACTIVE.name ||
+                    template == null || template.paused
+                ) {
+                    // 实例已结束或模板已停用：清理残留闹钟，不弹通知
                     entryPoint.reminderScheduler().cancel(instanceId)
                     return@launch
                 }

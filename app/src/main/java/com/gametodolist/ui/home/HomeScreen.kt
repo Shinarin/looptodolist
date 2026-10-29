@@ -69,6 +69,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -135,7 +136,9 @@ fun HomeScreen(
             }
             return@Scaffold
         }
-        if (data.activeGroups.isEmpty() && data.completedGroups.isEmpty() && data.expiredGroups.isEmpty()) {
+        if (data.activeGroups.isEmpty() && data.completedGroups.isEmpty() &&
+            data.expiredGroups.isEmpty() && data.pausedGroups.isEmpty()
+        ) {
             EmptyState(
                 text = "还没有清单，点右下角 + 创建第一条吧",
                 modifier = Modifier
@@ -162,7 +165,9 @@ fun HomeScreen(
                     collapsed = collapsed,
                     onToggle = viewModel::toggleCollapsed,
                     completed = false,
+                    paused = false,
                     onComplete = { viewModel.complete(it) },
+                    onTogglePause = viewModel::togglePause,
                     onDelete = ::requestDelete,
                     onClick = { onEditTask(it.template.id) }
                 )
@@ -181,7 +186,9 @@ fun HomeScreen(
                         collapsed = collapsed,
                         onToggle = viewModel::toggleCollapsed,
                         completed = true,
+                        paused = false,
                         onComplete = { viewModel.uncomplete(it) },
+                        onTogglePause = viewModel::togglePause,
                         onDelete = ::requestDelete,
                         onClick = { onEditTask(it.template.id) }
                     )
@@ -209,6 +216,28 @@ fun HomeScreen(
                             )
                         }
                     }
+                }
+            }
+
+            // ---------- 已停用区（为空时不显示） ----------
+            if (data.pausedGroups.isNotEmpty()) {
+                item(key = "paused_divider", contentType = "divider") {
+                    Spacer(Modifier.padding(top = 8.dp))
+                }
+                sectionHeader("已停用", data.pausedGroups.sumOf { it.items.size }, "项")
+                data.pausedGroups.forEach { group ->
+                    categorySection(
+                        sectionKey = "paused",
+                        group = group,
+                        collapsed = collapsed,
+                        onToggle = viewModel::toggleCollapsed,
+                        completed = false,
+                        paused = true,
+                        onComplete = { },
+                        onTogglePause = viewModel::togglePause,
+                        onDelete = ::requestDelete,
+                        onClick = { onEditTask(it.template.id) }
+                    )
                 }
             }
         }
@@ -279,7 +308,9 @@ private fun LazyListScope.categorySection(
     collapsed: Set<String>,
     onToggle: (String) -> Unit,
     completed: Boolean,
+    paused: Boolean,
     onComplete: (TemplateWithInstance) -> Unit,
+    onTogglePause: (TemplateWithInstance) -> Unit,
     onDelete: (TemplateWithInstance) -> Unit,
     onClick: (TemplateWithInstance) -> Unit
 ) {
@@ -302,7 +333,9 @@ private fun LazyListScope.categorySection(
                         item = item,
                         color = group.color(),
                         completed = completed,
+                        paused = paused,
                         onComplete = { onComplete(item) },
+                        onTogglePause = { onTogglePause(item) },
                         onRequestDelete = { onDelete(item) },
                         onClick = { onClick(item) }
                     )
@@ -356,13 +389,13 @@ private fun CategoryHeader(
     }
 }
 
-/** 滑动手势的锚点：收起 / 露出删除按钮 */
+/** 滑动手势的锚点：收起 / 露出操作按钮 */
 internal enum class SwipeAnchor { Closed, Revealed }
 
 @OptIn(ExperimentalFoundationApi::class)
 internal fun createSwipeRevealState(
     actionWidthPx: Float,
-    velocityThresholdPx: () -> Float,
+    density: Density,
     decayAnimationSpec: DecayAnimationSpec<Float>
 ): AnchoredDraggableState<SwipeAnchor> {
     val anchors = DraggableAnchors<SwipeAnchor> {
@@ -372,58 +405,80 @@ internal fun createSwipeRevealState(
     return AnchoredDraggableState(
         initialValue = SwipeAnchor.Closed,
         anchors = anchors,
-        positionalThreshold = { totalDistance -> totalDistance * 0.5f },
-        velocityThreshold = velocityThresholdPx,
+        positionalThreshold = { totalDistance -> totalDistance * 0.65f },
+        velocityThreshold = { with(density) { 700.dp.toPx() } },
         snapAnimationSpec = tween(durationMillis = 200),
         decayAnimationSpec = decayAnimationSpec
     )
 }
 
-/**
- * 左滑露出「删除」按钮的操作行：滑动松手后停在露出态（不直接触发任何操作），
- * 点红色「删除」按钮才走删除流程——避免误滑完成/误滑删除。反向滑回收起。
- */
+/** 左滑停住露出操作按钮，点击才执行；反向滑回收起。 */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SwipeRevealDeleteBox(
+private fun SwipeRevealActionsBox(
     onRequestDelete: () -> Unit,
+    onTogglePause: (() -> Unit)? = null,
+    pauseActionLabel: String = "停用",
     content: @Composable () -> Unit
 ) {
     val density = LocalDensity.current
-    val actionWidth = 88.dp
+    val actionWidth = if (onTogglePause == null) 88.dp else 176.dp
     val actionWidthPx = with(density) { actionWidth.toPx() }
     val scope = rememberCoroutineScope()
     val decay = rememberSplineBasedDecay<Float>()
-    val state = remember(actionWidthPx, decay) {
+    val state = remember(actionWidthPx, density, decay) {
         createSwipeRevealState(
             actionWidthPx = actionWidthPx,
-            velocityThresholdPx = { with(density) { 200.dp.toPx() } },
+            density = density,
             decayAnimationSpec = decay
         )
     }
 
     Box(modifier = Modifier.fillMaxWidth()) {
-        // 底层：右侧红色「删除」按钮，露出后才能点到
         Box(
             modifier = Modifier
                 .matchParentSize()
                 .background(ExpiredRed, MaterialTheme.shapes.medium)
         ) {
-            Box(
+            Row(
                 modifier = Modifier
                     .align(Alignment.CenterEnd)
                     .width(actionWidth)
                     .fillMaxHeight()
-                    .clickable {
-                        scope.launch { state.animateTo(SwipeAnchor.Closed) }
-                        onRequestDelete()
-                    },
-                contentAlignment = Alignment.Center
             ) {
-                Text("删除", color = Color.White, style = MaterialTheme.typography.labelLarge)
+                if (onTogglePause != null) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxHeight()
+                            .background(MaterialTheme.colorScheme.onSurfaceVariant)
+                            .clickable {
+                                scope.launch { state.animateTo(SwipeAnchor.Closed) }
+                                onTogglePause()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            pauseActionLabel,
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge
+                        )
+                    }
+                }
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                        .clickable {
+                            scope.launch { state.animateTo(SwipeAnchor.Closed) }
+                            onRequestDelete()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text("删除", color = Color.White, style = MaterialTheme.typography.labelLarge)
+                }
             }
         }
-        // 上层：可左滑的内容卡片
         Box(
             modifier = Modifier
                 .graphicsLayer { translationX = state.requireOffset() }
@@ -439,17 +494,24 @@ private fun SwipeableTaskCard(
     item: TemplateWithInstance,
     color: Color,
     completed: Boolean,
+    paused: Boolean,
     onComplete: () -> Unit,
+    onTogglePause: () -> Unit,
     onRequestDelete: () -> Unit,
     onClick: () -> Unit
 ) {
-    SwipeRevealDeleteBox(onRequestDelete = onRequestDelete) {
+    SwipeRevealActionsBox(
+        onRequestDelete = onRequestDelete,
+        onTogglePause = onTogglePause,
+        pauseActionLabel = if (paused) "恢复" else "停用"
+    ) {
         TaskCard(
             item = item,
             categoryColor = color,
             onComplete = onComplete,
             onClick = onClick,
-            completed = completed
+            completed = completed,
+            paused = paused
         )
     }
 }
@@ -462,7 +524,7 @@ private fun SwipeableExpiredCard(
     onRequestDelete: () -> Unit,
     onClick: () -> Unit
 ) {
-    SwipeRevealDeleteBox(onRequestDelete = onRequestDelete) {
+    SwipeRevealActionsBox(onRequestDelete = onRequestDelete) {
         ExpiredTaskCard(item = item, color = color, onRevive = onRevive, onClick = onClick)
     }
 }

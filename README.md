@@ -6,7 +6,7 @@
 
 ![Platform](https://img.shields.io/badge/平台-Android%208.0%2B-3DDC84)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Compose%20M3-7F52FF)
-![Version](https://img.shields.io/badge/版本-1.0.3-E3709E)
+![Version](https://img.shields.io/badge/版本-1.0.4-E3709E)
 
 <p>
   <img src="docs/screenshots/home.png" width="250" alt="主页" />

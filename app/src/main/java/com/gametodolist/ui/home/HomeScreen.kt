@@ -1,6 +1,7 @@
 package com.gametodolist.ui.home
 
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.DecayAnimationSpec
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
@@ -26,7 +27,6 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -54,7 +54,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -64,12 +63,12 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -82,7 +81,6 @@ import com.gametodolist.ui.components.TaskCard
 import com.gametodolist.ui.theme.ExpiredRed
 import com.gametodolist.ui.theme.UncategorizedGray
 import kotlinx.coroutines.launch
-import kotlin.math.roundToInt
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -172,7 +170,9 @@ fun HomeScreen(
 
             // ---------- 已完成区（为空时不显示） ----------
             if (data.completedGroups.isNotEmpty()) {
-                item(key = "completed_divider") { Spacer(Modifier.padding(top = 8.dp)) }
+                item(key = "completed_divider", contentType = "divider") {
+                    Spacer(Modifier.padding(top = 8.dp))
+                }
                 sectionHeader("已完成", data.completedGroups.sumOf { it.items.size }, "项")
                 data.completedGroups.forEach { group ->
                     categorySection(
@@ -190,11 +190,16 @@ fun HomeScreen(
 
             // ---------- 已作废区（为空时不显示） ----------
             if (data.expiredGroups.isNotEmpty()) {
-                item(key = "expired_divider") { Spacer(Modifier.padding(top = 8.dp)) }
+                item(key = "expired_divider", contentType = "divider") {
+                    Spacer(Modifier.padding(top = 8.dp))
+                }
                 sectionHeader("已作废", data.expiredGroups.sumOf { it.items.size }, "项")
                 data.expiredGroups.forEach { group ->
                     group.items.forEach { item ->
-                        item(key = "expired_${group.category?.id ?: -1L}_${item.template.id}") {
+                        item(
+                            key = "expired_${group.category?.id ?: -1L}_${item.template.id}",
+                            contentType = "expired_task"
+                        ) {
                             SwipeableExpiredCard(
                                 item = item,
                                 color = group.color(),
@@ -245,7 +250,7 @@ fun HomeScreen(
 }
 
 private fun LazyListScope.sectionHeader(title: String, count: Int, unit: String) {
-    item(key = "section_$title") {
+    item(key = "section_$title", contentType = "section_header") {
         Row(
             modifier = Modifier.padding(top = 6.dp),
             verticalAlignment = Alignment.CenterVertically
@@ -281,11 +286,11 @@ private fun LazyListScope.categorySection(
     val key = "$sectionKey:${group.category?.id ?: -1L}"
     val isCollapsed = key in collapsed
 
-    item(key = "header_$key") {
+    item(key = "header_$key", contentType = "category_header") {
         CategoryHeader(group = group, collapsed = isCollapsed, onToggle = { onToggle(key) })
     }
 
-    item(key = "items_$key") {
+    item(key = "items_$key", contentType = "task_group") {
         AnimatedVisibility(
             visible = !isCollapsed,
             enter = expandVertically(tween(150)) + fadeIn(tween(150)),
@@ -352,7 +357,27 @@ private fun CategoryHeader(
 }
 
 /** 滑动手势的锚点：收起 / 露出删除按钮 */
-private enum class SwipeAnchor { Closed, Revealed }
+internal enum class SwipeAnchor { Closed, Revealed }
+
+@OptIn(ExperimentalFoundationApi::class)
+internal fun createSwipeRevealState(
+    actionWidthPx: Float,
+    velocityThresholdPx: () -> Float,
+    decayAnimationSpec: DecayAnimationSpec<Float>
+): AnchoredDraggableState<SwipeAnchor> {
+    val anchors = DraggableAnchors<SwipeAnchor> {
+        SwipeAnchor.Closed at 0f
+        SwipeAnchor.Revealed at -actionWidthPx
+    }
+    return AnchoredDraggableState(
+        initialValue = SwipeAnchor.Closed,
+        anchors = anchors,
+        positionalThreshold = { totalDistance -> totalDistance * 0.5f },
+        velocityThreshold = velocityThresholdPx,
+        snapAnimationSpec = tween(durationMillis = 200),
+        decayAnimationSpec = decayAnimationSpec
+    )
+}
 
 /**
  * 左滑露出「删除」按钮的操作行：滑动松手后停在露出态（不直接触发任何操作），
@@ -369,21 +394,11 @@ private fun SwipeRevealDeleteBox(
     val actionWidthPx = with(density) { actionWidth.toPx() }
     val scope = rememberCoroutineScope()
     val decay = rememberSplineBasedDecay<Float>()
-    val state = remember {
-        AnchoredDraggableState(
-            initialValue = SwipeAnchor.Closed,
-            positionalThreshold = { totalDistance -> totalDistance * 0.5f },
-            velocityThreshold = { with(density) { 200.dp.toPx() } },
-            snapAnimationSpec = tween(durationMillis = 200),
+    val state = remember(actionWidthPx, decay) {
+        createSwipeRevealState(
+            actionWidthPx = actionWidthPx,
+            velocityThresholdPx = { with(density) { 200.dp.toPx() } },
             decayAnimationSpec = decay
-        )
-    }
-    SideEffect {
-        state.updateAnchors(
-            DraggableAnchors {
-                SwipeAnchor.Closed at 0f
-                SwipeAnchor.Revealed at -actionWidthPx
-            }
         )
     }
 
@@ -411,10 +426,7 @@ private fun SwipeRevealDeleteBox(
         // 上层：可左滑的内容卡片
         Box(
             modifier = Modifier
-                .offset {
-                    val x = state.offset
-                    IntOffset(if (x.isNaN()) 0 else x.roundToInt(), 0)
-                }
+                .graphicsLayer { translationX = state.requireOffset() }
                 .anchoredDraggable(state, Orientation.Horizontal)
         ) {
             content()

@@ -3,16 +3,25 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
-    <!-- 圆环：循环 -->
     <path
-        android:pathData="M78,54 A24,24 0 1 0 30,54 A24,24 0 1 0 78,54 Z"
+        android:name="cycle_loop"
+        android:pathData="M68,28 C56,22 43,26 35,37 C26,49 27,66 39,75 C50,84 66,81 75,69"
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFF"
         android:strokeWidth="6"
-        android:strokeLineCap="round" />
-    <!-- 对勾：完成 -->
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
     <path
-        android:pathData="M44,54.5 L51.5,62 L66,46"
+        android:name="cycle_arrowhead"
+        android:pathData="M75,80 L75,69 L65,72"
+        android:fillColor="#00000000"
+        android:strokeColor="#FFFFFF"
+        android:strokeWidth="6"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round" />
+    <path
+        android:name="completion_check"
+        android:pathData="M38,53 L49,64 L72,40"
         android:fillColor="#00000000"
         android:strokeColor="#FFFFFF"
         android:strokeWidth="7"

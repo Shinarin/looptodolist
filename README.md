@@ -6,7 +6,7 @@
 
 ![Platform](https://img.shields.io/badge/平台-Android%208.0%2B-3DDC84)
 ![Kotlin](https://img.shields.io/badge/Kotlin-Compose%20M3-7F52FF)
-![Version](https://img.shields.io/badge/版本-1.0.2-E3709E)
+![Version](https://img.shields.io/badge/版本-1.0.3-E3709E)
 
 <p>
   <img src="docs/screenshots/home.png" width="250" alt="主页" />
@@ -91,7 +91,7 @@ Kotlin · Jetpack Compose（Material 3）· Room · Hilt · WorkManager · Glanc
 
 - minSdk 26 / targetSdk 35
 - 架构：`domain` 纯函数业务规则（循环引擎 / 结算器 / 裁剪计算，不碰 Android API）+ Room 三表数据层（模板 / 实例 / 分类，带迁移与唯一索引）+ 统一写后管线（任何写操作后自动结算 → 重排提醒 → 刷新小组件）+ Compose UI + Glance 小组件
-- 50 例单元 / 集成测试：业务规则走 JVM 纯函数测试，数据库迁移与"编辑模板不丢实例历史"等数据完整性走 Robolectric 真实 Room（内存库）集成测试
+- 64 例单元 / 集成测试：业务规则走 JVM 纯函数测试，数据库迁移与"编辑模板不丢实例历史"等数据完整性走 Robolectric 真实 Room（内存库）集成测试
 
 ## 📦 构建
 

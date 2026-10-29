@@ -3,11 +3,13 @@ package com.gametodolist.ui
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
 import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Settings
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
@@ -18,6 +20,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.unit.dp
 import androidx.navigation.NavGraph.Companion.findStartDestination
 import androidx.navigation.NavType
 import androidx.navigation.compose.NavHost
@@ -67,28 +70,31 @@ fun AppNav() {
                     selectedTextColor = MaterialTheme.colorScheme.primary,
                     indicatorColor = MaterialTheme.colorScheme.primaryContainer
                 )
-                NavigationBar {
-                    NavigationBarItem(
-                        selected = currentRoute == Routes.HOME,
-                        onClick = { navigateMain(Routes.HOME) },
-                        icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
-                        label = { Text("清单") },
-                        colors = itemColors
-                    )
-                    NavigationBarItem(
-                        selected = currentRoute == Routes.CALENDAR,
-                        onClick = { navigateMain(Routes.CALENDAR) },
-                        icon = { Icon(Icons.Default.DateRange, contentDescription = null) },
-                        label = { Text("日历") },
-                        colors = itemColors
-                    )
-                    NavigationBarItem(
-                        selected = currentRoute == Routes.SETTINGS,
-                        onClick = { navigateMain(Routes.SETTINGS) },
-                        icon = { Icon(Icons.Default.Settings, contentDescription = null) },
-                        label = { Text("设置") },
-                        colors = itemColors
-                    )
+                Column {
+                    HorizontalDivider(thickness = 1.dp, color = MaterialTheme.colorScheme.primary)
+                    NavigationBar {
+                        NavigationBarItem(
+                            selected = currentRoute == Routes.HOME,
+                            onClick = { navigateMain(Routes.HOME) },
+                            icon = { Icon(Icons.AutoMirrored.Filled.List, contentDescription = null) },
+                            label = { Text("清单") },
+                            colors = itemColors
+                        )
+                        NavigationBarItem(
+                            selected = currentRoute == Routes.CALENDAR,
+                            onClick = { navigateMain(Routes.CALENDAR) },
+                            icon = { Icon(Icons.Default.DateRange, contentDescription = null) },
+                            label = { Text("日历") },
+                            colors = itemColors
+                        )
+                        NavigationBarItem(
+                            selected = currentRoute == Routes.SETTINGS,
+                            onClick = { navigateMain(Routes.SETTINGS) },
+                            icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                            label = { Text("设置") },
+                            colors = itemColors
+                        )
+                    }
                 }
             }
         }
